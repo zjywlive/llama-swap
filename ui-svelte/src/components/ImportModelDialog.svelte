@@ -1,8 +1,8 @@
 <script lang="ts">
   import { createEditableModel, fetchEditableModels, scanLocalModels } from "../stores/api";
   import { tx } from "../stores/i18n";
-  import type { EditableModelConfig, ScannedGGUFModel } from "../lib/types";
-  import { buildLlamaServerCommand, defaultRuntime, parseRuntimeCommand } from "../lib/modelConfig";
+  import type { EditableModelConfig, ScannedLocalModel } from "../lib/types";
+  import { buildLlamaServerCommand, buildMLXServerCommand, defaultMLXRuntime, defaultRuntime, parseRuntimeCommand } from "../lib/modelConfig";
 
   interface Props {
     open: boolean;
@@ -16,7 +16,7 @@
   let isScanning = $state(false);
   let isImporting = $state(false);
   let recursive = $state(true);
-  let models = $state<ScannedGGUFModel[]>([]);
+  let models = $state<ScannedLocalModel[]>([]);
   let warnings = $state<string[]>([]);
   let error = $state<string | null>(null);
   let message = $state<string | null>(null);
@@ -62,7 +62,7 @@
         let modelPath = model.modelInfo?.path ?? "";
         if (!modelPath) {
           const parsed = parseRuntimeCommand(model.cmd);
-          modelPath = parsed.runtime.modelPath;
+          modelPath = parsed.kind === "mlx-lm" ? parsed.mlxRuntime.modelPath : parsed.runtime.modelPath;
         }
         if (!modelPath || modelPath.includes("${")) continue;
         const parent = dirname(modelPath);
@@ -98,7 +98,11 @@
     }
   }
 
-  function buildImportedConfig(scanned: ScannedGGUFModel): EditableModelConfig {
+  function backendLabel(scanned: ScannedLocalModel): string {
+    return scanned.backend === "mlx-lm" ? "MLX / mlx-lm" : "GGUF / llama.cpp";
+  }
+
+  function buildLlamaImportedCommand(scanned: ScannedLocalModel): string {
     const info = scanned.modelInfo;
     const limits = info?.limits;
     const hardwareThreads = typeof navigator !== "undefined" && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4;
@@ -119,17 +123,31 @@
     runtime.gpuLayers = 0;
     runtime.noWarmup = true;
     runtime.extraArgs = `--alias ${scanned.idSuggestion}`;
+    return buildLlamaServerCommand(runtime);
+  }
 
+  function buildMLXImportedCommand(scanned: ScannedLocalModel): string {
+    const info = scanned.modelInfo;
+    const runtime = defaultMLXRuntime();
+    runtime.modelPath = scanned.path;
+    runtime.maxTokens = Math.min(512, info?.contextLength || 512);
+    runtime.prefillStepSize = Math.min(2048, info?.contextLength || 2048);
+    return buildMLXServerCommand(runtime);
+  }
+
+  function buildImportedConfig(scanned: ScannedLocalModel): EditableModelConfig {
+    const info = scanned.modelInfo;
+    const isMLX = scanned.backend === "mlx-lm";
     return {
       id: scanned.idSuggestion,
-      cmd: buildLlamaServerCommand(runtime),
+      cmd: isMLX ? buildMLXImportedCommand(scanned) : buildLlamaImportedCommand(scanned),
       cmdStop: "",
       name: scanned.name || basenameWithoutExt(scanned.path),
       description: "",
       env: [],
       proxy: "http://127.0.0.1:${PORT}",
       aliases: [],
-      checkEndpoint: "/health",
+      checkEndpoint: isMLX ? "/v1/models" : "/health",
       ttl: 300,
       unlisted: false,
       useModelName: "",
@@ -153,7 +171,7 @@
     };
   }
 
-  async function importModel(scanned: ScannedGGUFModel): Promise<void> {
+  async function importModel(scanned: ScannedLocalModel): Promise<void> {
     isImporting = true;
     importingPath = scanned.path;
     error = null;
@@ -233,6 +251,7 @@
             <thead class="sticky top-0 bg-card z-10">
               <tr class="text-left border-b border-gray-200 dark:border-white/10 bg-surface">
                 <th>{$tx.models.name}</th>
+                <th>{$tx.importer.type}</th>
                 <th>{$tx.importer.modelId}</th>
                 <th>{$tx.importer.context}</th>
                 <th>{$tx.importer.layers}</th>
@@ -247,7 +266,7 @@
                     <div class="mt-1 break-all font-mono text-xs text-txtsecondary">{model.path}</div>
                     {#if model.modelInfo}
                       <div class="mt-1 text-xs text-txtsecondary">
-                        {model.modelInfo.architecture || $tx.common.unknown}
+                        {model.modelInfo.architecture || model.modelInfo.modelType || $tx.common.unknown}
                         {model.modelInfo.quantization ? ` · ${model.modelInfo.quantization}` : ""}
                       </div>
                     {/if}
@@ -259,6 +278,7 @@
                       </div>
                     {/if}
                   </td>
+                  <td>{backendLabel(model)}</td>
                   <td class="break-all font-mono text-xs">{model.idSuggestion}</td>
                   <td>{numberLabel(model.modelInfo?.contextLength)}</td>
                   <td>{numberLabel(model.modelInfo?.blockCount)}</td>

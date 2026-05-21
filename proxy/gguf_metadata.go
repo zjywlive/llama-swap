@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -44,11 +45,14 @@ type ggufModelLimits struct {
 type ggufModelInfo struct {
 	Path              string          `json:"path"`
 	Exists            bool            `json:"exists"`
+	Backend           string          `json:"backend"`
 	Format            string          `json:"format"`
 	Version           uint32          `json:"version"`
 	Name              string          `json:"name"`
 	Architecture      string          `json:"architecture"`
+	ModelType         string          `json:"modelType"`
 	Quantization      string          `json:"quantization"`
+	TorchDType        string          `json:"torchDtype"`
 	FileType          int             `json:"fileType"`
 	ContextLength     int             `json:"contextLength"`
 	BlockCount        int             `json:"blockCount"`
@@ -76,6 +80,21 @@ func inspectGGUFModel(modelPath string) (*ggufModelInfo, error) {
 
 	info := ggufInfoFromMetadata(expandedPath, version, metadata)
 	return &info, nil
+}
+
+func inspectLocalModelPath(modelPath string) (*ggufModelInfo, error) {
+	expandedPath := expandLocalModelPath(modelPath)
+	stat, err := os.Stat(expandedPath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot stat model path: %w", err)
+	}
+	if stat.IsDir() {
+		return inspectMLXModel(expandedPath)
+	}
+	if isGGUFPath(expandedPath) {
+		return inspectGGUFModel(expandedPath)
+	}
+	return nil, fmt.Errorf("unsupported model path")
 }
 
 func expandLocalModelPath(modelPath string) string {
@@ -308,10 +327,12 @@ func ggufInfoFromMetadata(modelPath string, version uint32, metadata map[string]
 	return ggufModelInfo{
 		Path:              modelPath,
 		Exists:            true,
+		Backend:           "llama-server",
 		Format:            "gguf",
 		Version:           version,
 		Name:              stringMetadata(metadata, "general.name"),
 		Architecture:      architecture,
+		ModelType:         architecture,
 		Quantization:      ggufFileTypeName(fileType),
 		FileType:          fileType,
 		ContextLength:     contextLength,
@@ -369,12 +390,147 @@ func validateGGUFRuntimeLimits(cmd string) error {
 	return nil
 }
 
+func inspectMLXModel(modelPath string) (*ggufModelInfo, error) {
+	expandedPath := expandLocalModelPath(modelPath)
+	if !looksLikeMLXModelDir(expandedPath) {
+		return nil, fmt.Errorf("not a recognized MLX model directory")
+	}
+
+	configPath := filepath.Join(expandedPath, "config.json")
+	configBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("read config.json: %w", err)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(configBytes, &metadata); err != nil {
+		return nil, fmt.Errorf("parse config.json: %w", err)
+	}
+
+	name := stringMetadata(metadata, "_name_or_path")
+	if name == "" {
+		name = displayNameFromModelPath(expandedPath)
+	}
+	modelType := stringMetadata(metadata, "model_type")
+	architecture := firstStringListMetadata(metadata, "architectures")
+	contextLength := intMetadata(metadata, "max_position_embeddings")
+	blockCount := intMetadata(metadata, "num_hidden_layers")
+	quantization := mlxQuantizationName(metadata)
+
+	info := ggufModelInfo{
+		Path:              expandedPath,
+		Exists:            true,
+		Backend:           "mlx-lm",
+		Format:            "mlx",
+		Name:              name,
+		Architecture:      architecture,
+		ModelType:         modelType,
+		Quantization:      quantization,
+		TorchDType:        stringMetadata(metadata, "torch_dtype"),
+		ContextLength:     contextLength,
+		BlockCount:        blockCount,
+		EmbeddingLength:   intMetadata(metadata, "hidden_size"),
+		FeedForwardLength: intMetadata(metadata, "intermediate_size"),
+		HeadCount:         intMetadata(metadata, "num_attention_heads"),
+		HeadCountKV:       intMetadata(metadata, "num_key_value_heads"),
+		VocabularySize:    intMetadata(metadata, "vocab_size"),
+		Limits: ggufModelLimits{
+			ContextMax:    contextLength,
+			GPULayerMax:   0,
+			BatchMax:      max(512, contextLength),
+			MicroBatchMax: max(512, contextLength),
+			ThreadsMax:    max(1, runtime.NumCPU()),
+			ParallelMax:   64,
+		},
+		Warnings: []string{},
+	}
+	if info.ContextLength == 0 {
+		info.Warnings = append(info.Warnings, "context length was not found in config.json")
+	}
+	return &info, nil
+}
+
+func looksLikeMLXModelDir(dir string) bool {
+	stat, err := os.Stat(dir)
+	if err != nil || !stat.IsDir() {
+		return false
+	}
+	if !fileExists(filepath.Join(dir, "config.json")) {
+		return false
+	}
+	if !fileExists(filepath.Join(dir, "tokenizer.json")) && !fileExists(filepath.Join(dir, "tokenizer_config.json")) {
+		return false
+	}
+	if fileExists(filepath.Join(dir, "model.safetensors")) {
+		return true
+	}
+	if hasSafetensorsFile(dir) {
+		configBytes, err := os.ReadFile(filepath.Join(dir, "config.json"))
+		if err != nil {
+			return false
+		}
+		var metadata map[string]any
+		if err := json.Unmarshal(configBytes, &metadata); err != nil {
+			return false
+		}
+		_, hasQuantization := metadata["quantization"]
+		return hasQuantization
+	}
+	return false
+}
+
+func fileExists(path string) bool {
+	stat, err := os.Stat(path)
+	return err == nil && !stat.IsDir()
+}
+
+func hasSafetensorsFile(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.EqualFold(filepath.Ext(entry.Name()), ".safetensors") {
+			return true
+		}
+	}
+	return false
+}
+
+func mlxQuantizationName(metadata map[string]any) string {
+	if quantization, ok := metadata["quantization"].(map[string]any); ok {
+		bits := intMetadata(quantization, "bits")
+		groupSize := intMetadata(quantization, "group_size")
+		if bits > 0 && groupSize > 0 {
+			return fmt.Sprintf("%d-bit g%d", bits, groupSize)
+		}
+		if bits > 0 {
+			return fmt.Sprintf("%d-bit", bits)
+		}
+	}
+	return stringMetadata(metadata, "torch_dtype")
+}
+
 func modelPathFromCommand(cmd string) (string, bool) {
+	if modelPath, ok := llamaModelPathFromCommand(cmd); ok {
+		return modelPath, true
+	}
+	return mlxModelPathFromCommand(cmd)
+}
+
+func llamaModelPathFromCommand(cmd string) (string, bool) {
 	args, ok := llamaServerCommandArgs(cmd)
 	if !ok {
 		return "", false
 	}
 	return flagValue(args, "--model", "-m")
+}
+
+func mlxModelPathFromCommand(cmd string) (string, bool) {
+	args, ok := mlxServerCommandArgs(cmd)
+	if !ok {
+		return "", false
+	}
+	return flagValue(args, "--model")
 }
 
 func llamaServerCommandArgs(cmd string) ([]string, bool) {
@@ -383,6 +539,15 @@ func llamaServerCommandArgs(cmd string) ([]string, bool) {
 		return nil, false
 	}
 	return args, strings.Contains(filepath.Base(args[0]), "llama-server")
+}
+
+func mlxServerCommandArgs(cmd string) ([]string, bool) {
+	args, err := config.SanitizeCommand(cmd)
+	if err != nil || len(args) == 0 {
+		return nil, false
+	}
+	executable := filepath.Base(args[0])
+	return args, executable == "mlx_lm.server" || strings.Contains(executable, "mlx-lm")
 }
 
 func flagValue(args []string, names ...string) (string, bool) {
@@ -421,6 +586,22 @@ func stringMetadata(metadata map[string]any, key string) string {
 	return text
 }
 
+func firstStringListMetadata(metadata map[string]any, key string) string {
+	value, ok := metadata[key]
+	if !ok {
+		return ""
+	}
+	if values, ok := value.([]any); ok && len(values) > 0 {
+		if text, ok := values[0].(string); ok {
+			return text
+		}
+	}
+	if values, ok := value.([]string); ok && len(values) > 0 {
+		return values[0]
+	}
+	return ""
+}
+
 func intMetadata(metadata map[string]any, key string) int {
 	value, ok := metadata[key]
 	if !ok {
@@ -454,6 +635,11 @@ func intMetadata(metadata map[string]any, key string) int {
 		return int(typed)
 	case int:
 		return typed
+	case float64:
+		if typed > float64(maxIntValue()) || typed < float64(minIntValue()) {
+			return 0
+		}
+		return int(typed)
 	default:
 		return 0
 	}

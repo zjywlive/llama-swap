@@ -12,16 +12,23 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const maxScannedGGUFModels = 200
+const maxScannedLocalModels = 200
 
 type scanLocalModelsRequest struct {
 	Dir       string `json:"dir"`
 	Recursive bool   `json:"recursive"`
 }
 
-type scannedGGUFModel struct {
+type localModelCandidate struct {
+	Path    string
+	Backend string
+}
+
+type scannedLocalModel struct {
 	Path         string         `json:"path"`
 	Name         string         `json:"name"`
+	Backend      string         `json:"backend"`
+	Format       string         `json:"format"`
 	IDSuggestion string         `json:"idSuggestion"`
 	Imported     bool           `json:"imported"`
 	ExistingID   string         `json:"existingId"`
@@ -30,9 +37,9 @@ type scannedGGUFModel struct {
 }
 
 type scanLocalModelsResponse struct {
-	Dir      string             `json:"dir"`
-	Models   []scannedGGUFModel `json:"models"`
-	Warnings []string           `json:"warnings"`
+	Dir      string              `json:"dir"`
+	Models   []scannedLocalModel `json:"models"`
+	Warnings []string            `json:"warnings"`
 }
 
 func (pm *ProxyManager) apiScanLocalModels(c *gin.Context) {
@@ -61,12 +68,27 @@ func (pm *ProxyManager) apiScanLocalModels(c *gin.Context) {
 	importedPaths := pm.importedModelPaths()
 	usedIDs := pm.usedModelIDs()
 	warnings := []string{}
-	files := []string{}
+	candidates := []localModelCandidate{}
+	seen := map[string]bool{}
+	addCandidate := func(path, backend string) {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			absPath = path
+		}
+		key := backend + "\x00" + absPath
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		candidates = append(candidates, localModelCandidate{Path: absPath, Backend: backend})
+	}
 
 	if !stat.IsDir() {
 		if isGGUFPath(dir) {
-			files = append(files, dir)
+			addCandidate(dir, "llama-server")
 		}
+	} else if looksLikeMLXModelDir(dir) {
+		addCandidate(dir, "mlx-lm")
 	} else if request.Recursive {
 		err = filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
@@ -77,14 +99,22 @@ func (pm *ProxyManager) apiScanLocalModels(c *gin.Context) {
 				if entry.Name() != "." && strings.HasPrefix(entry.Name(), ".") {
 					return filepath.SkipDir
 				}
+				if path != dir && looksLikeMLXModelDir(path) {
+					addCandidate(path, "mlx-lm")
+					if len(candidates) >= maxScannedLocalModels {
+						warnings = append(warnings, fmt.Sprintf("scan stopped after %d local models", maxScannedLocalModels))
+						return filepath.SkipAll
+					}
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			if !isGGUFPath(path) {
 				return nil
 			}
-			files = append(files, path)
-			if len(files) >= maxScannedGGUFModels {
-				warnings = append(warnings, fmt.Sprintf("scan stopped after %d GGUF files", maxScannedGGUFModels))
+			addCandidate(path, "llama-server")
+			if len(candidates) >= maxScannedLocalModels {
+				warnings = append(warnings, fmt.Sprintf("scan stopped after %d local models", maxScannedLocalModels))
 				return filepath.SkipAll
 			}
 			return nil
@@ -100,20 +130,25 @@ func (pm *ProxyManager) apiScanLocalModels(c *gin.Context) {
 			return
 		}
 		for _, entry := range entries {
+			path := filepath.Join(dir, entry.Name())
 			if entry.IsDir() {
+				if looksLikeMLXModelDir(path) {
+					addCandidate(path, "mlx-lm")
+				}
 				continue
 			}
-			path := filepath.Join(dir, entry.Name())
 			if isGGUFPath(path) {
-				files = append(files, path)
+				addCandidate(path, "llama-server")
 			}
 		}
 	}
 
-	sort.Strings(files)
-	models := make([]scannedGGUFModel, 0, len(files))
-	for _, path := range files {
-		scanned := pm.scannedModelFromPath(path, importedPaths, usedIDs)
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].Path < candidates[j].Path
+	})
+	models := make([]scannedLocalModel, 0, len(candidates))
+	for _, candidate := range candidates {
+		scanned := pm.scannedModelFromCandidate(candidate, importedPaths, usedIDs)
 		models = append(models, scanned)
 		usedIDs[scanned.IDSuggestion] = true
 	}
@@ -125,17 +160,19 @@ func (pm *ProxyManager) apiScanLocalModels(c *gin.Context) {
 	})
 }
 
-func (pm *ProxyManager) scannedModelFromPath(path string, importedPaths map[string]string, usedIDs map[string]bool) scannedGGUFModel {
-	absPath, err := filepath.Abs(path)
+func (pm *ProxyManager) scannedModelFromCandidate(candidate localModelCandidate, importedPaths map[string]string, usedIDs map[string]bool) scannedLocalModel {
+	absPath, err := filepath.Abs(candidate.Path)
 	if err != nil {
-		absPath = path
+		absPath = candidate.Path
 	}
 
 	baseID := modelIDFromPath(absPath)
 	existingID := importedPaths[absPath]
-	scanned := scannedGGUFModel{
+	scanned := scannedLocalModel{
 		Path:         absPath,
 		Name:         displayNameFromModelPath(absPath),
+		Backend:      candidate.Backend,
+		Format:       scannedFormatForBackend(candidate.Backend),
 		IDSuggestion: uniqueModelID(baseID, usedIDs),
 		Imported:     existingID != "",
 		ExistingID:   existingID,
@@ -145,16 +182,25 @@ func (pm *ProxyManager) scannedModelFromPath(path string, importedPaths map[stri
 		scanned.IDSuggestion = existingID
 	}
 
-	info, err := inspectGGUFModel(absPath)
+	info, err := inspectLocalModelPath(absPath)
 	if err != nil {
 		scanned.Warnings = []string{err.Error()}
 		return scanned
 	}
 	scanned.ModelInfo = info
+	scanned.Backend = info.Backend
+	scanned.Format = info.Format
 	if info.Name != "" {
 		scanned.Name = info.Name
 	}
 	return scanned
+}
+
+func scannedFormatForBackend(backend string) string {
+	if backend == "mlx-lm" {
+		return "mlx"
+	}
+	return "gguf"
 }
 
 func (pm *ProxyManager) importedModelPaths() map[string]string {

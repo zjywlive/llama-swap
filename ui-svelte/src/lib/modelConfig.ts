@@ -19,9 +19,38 @@ export interface LlamaServerRuntime {
   extraArgs: string;
 }
 
+export interface MLXServerRuntime {
+  executable: string;
+  modelPath: string;
+  host: string;
+  port: string;
+  adapterPath: string;
+  allowedOrigins: string;
+  draftModel: string;
+  numDraftTokens: number | "";
+  trustRemoteCode: boolean;
+  logLevel: "" | "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";
+  chatTemplate: string;
+  useDefaultChatTemplate: boolean;
+  temp: number | "";
+  topP: number | "";
+  topK: number | "";
+  minP: number | "";
+  maxTokens: number | "";
+  chatTemplateArgs: string;
+  decodeConcurrency: number | "";
+  promptConcurrency: number | "";
+  prefillStepSize: number | "";
+  promptCacheSize: number | "";
+  promptCacheBytes: string;
+  pipeline: boolean;
+  extraArgs: string;
+}
+
 export interface ParsedRuntime {
-  kind: "llama-server" | "raw";
+  kind: "llama-server" | "mlx-lm" | "raw";
   runtime: LlamaServerRuntime;
+  mlxRuntime: MLXServerRuntime;
 }
 
 export function defaultRuntime(): LlamaServerRuntime {
@@ -43,6 +72,36 @@ export function defaultRuntime(): LlamaServerRuntime {
     noWarmup: false,
     cacheTypeK: "",
     cacheTypeV: "",
+    extraArgs: "",
+  };
+}
+
+export function defaultMLXRuntime(): MLXServerRuntime {
+  return {
+    executable: "/Users/rick/.local/bin/mlx_lm.server",
+    modelPath: "",
+    host: "127.0.0.1",
+    port: "${PORT}",
+    adapterPath: "",
+    allowedOrigins: "",
+    draftModel: "",
+    numDraftTokens: "",
+    trustRemoteCode: false,
+    logLevel: "",
+    chatTemplate: "",
+    useDefaultChatTemplate: false,
+    temp: 0,
+    topP: 1,
+    topK: "",
+    minP: "",
+    maxTokens: 512,
+    chatTemplateArgs: "",
+    decodeConcurrency: "",
+    promptConcurrency: "",
+    prefillStepSize: 2048,
+    promptCacheSize: "",
+    promptCacheBytes: "",
+    pipeline: false,
     extraArgs: "",
   };
 }
@@ -97,7 +156,7 @@ function asNumber(value: string | undefined): number | "" {
 
 function quoteArg(arg: string): string {
   if (arg === "") return "''";
-  if (/^[A-Za-z0-9_./:=,+@%{}-]+$/.test(arg)) return arg;
+  if (/^[A-Za-z0-9_./:=,+@%{}$-]+$/.test(arg)) return arg;
   return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
@@ -106,12 +165,137 @@ function appendValue(args: string[], flag: string, value: string | number | ""):
   args.push(flag, String(value));
 }
 
+function appendBoolean(args: string[], flag: string, value: boolean): void {
+  if (value) args.push(flag);
+}
+
 export function parseRuntimeCommand(cmd: string): ParsedRuntime {
   const runtime = defaultRuntime();
+  const mlxRuntime = defaultMLXRuntime();
   const tokens = shellSplit(cmd);
-  if (tokens.length === 0 || !basename(tokens[0]).includes("llama-server")) {
+  if (tokens.length === 0) {
     runtime.extraArgs = cmd;
-    return { kind: "raw", runtime };
+    return { kind: "raw", runtime, mlxRuntime };
+  }
+
+  const executableName = basename(tokens[0]);
+  if (executableName === "mlx_lm.server" || executableName.includes("mlx-lm")) {
+    mlxRuntime.executable = tokens[0];
+    const extra: string[] = [];
+    const takeValue = (index: number) => (index + 1 < tokens.length ? tokens[index + 1] : undefined);
+
+    for (let i = 1; i < tokens.length; i++) {
+      const flag = tokens[i];
+      const value = takeValue(i);
+      const consume = () => { i++; };
+
+      switch (flag) {
+        case "--model":
+          mlxRuntime.modelPath = value ?? "";
+          consume();
+          break;
+        case "--host":
+          mlxRuntime.host = value ?? "";
+          consume();
+          break;
+        case "--port":
+          mlxRuntime.port = value ?? "";
+          consume();
+          break;
+        case "--adapter-path":
+          mlxRuntime.adapterPath = value ?? "";
+          consume();
+          break;
+        case "--allowed-origins":
+          mlxRuntime.allowedOrigins = value ?? "";
+          consume();
+          break;
+        case "--draft-model":
+          mlxRuntime.draftModel = value ?? "";
+          consume();
+          break;
+        case "--num-draft-tokens":
+          mlxRuntime.numDraftTokens = asNumber(value);
+          consume();
+          break;
+        case "--trust-remote-code":
+          mlxRuntime.trustRemoteCode = true;
+          break;
+        case "--log-level":
+          mlxRuntime.logLevel = (["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].includes(value ?? "") ? value : "") as MLXServerRuntime["logLevel"];
+          consume();
+          break;
+        case "--chat-template":
+          mlxRuntime.chatTemplate = value ?? "";
+          consume();
+          break;
+        case "--use-default-chat-template":
+          mlxRuntime.useDefaultChatTemplate = true;
+          break;
+        case "--temp":
+          mlxRuntime.temp = asNumber(value);
+          consume();
+          break;
+        case "--top-p":
+          mlxRuntime.topP = asNumber(value);
+          consume();
+          break;
+        case "--top-k":
+          mlxRuntime.topK = asNumber(value);
+          consume();
+          break;
+        case "--min-p":
+          mlxRuntime.minP = asNumber(value);
+          consume();
+          break;
+        case "--max-tokens":
+          mlxRuntime.maxTokens = asNumber(value);
+          consume();
+          break;
+        case "--chat-template-args":
+          mlxRuntime.chatTemplateArgs = value ?? "";
+          consume();
+          break;
+        case "--decode-concurrency":
+          mlxRuntime.decodeConcurrency = asNumber(value);
+          consume();
+          break;
+        case "--prompt-concurrency":
+          mlxRuntime.promptConcurrency = asNumber(value);
+          consume();
+          break;
+        case "--prefill-step-size":
+          mlxRuntime.prefillStepSize = asNumber(value);
+          consume();
+          break;
+        case "--prompt-cache-size":
+          mlxRuntime.promptCacheSize = asNumber(value);
+          consume();
+          break;
+        case "--prompt-cache-bytes":
+          mlxRuntime.promptCacheBytes = value ?? "";
+          consume();
+          break;
+        case "--pipeline":
+          mlxRuntime.pipeline = true;
+          break;
+        default:
+          extra.push(flag);
+          if (value && !value.startsWith("-")) {
+            extra.push(value);
+            consume();
+          }
+          break;
+      }
+    }
+
+    mlxRuntime.extraArgs = extra.map(quoteArg).join(" ");
+    return { kind: "mlx-lm", runtime, mlxRuntime };
+  }
+
+  if (!executableName.includes("llama-server")) {
+    runtime.extraArgs = cmd;
+    return { kind: "raw", runtime, mlxRuntime };
   }
 
   runtime.executable = tokens[0];
@@ -221,7 +405,7 @@ export function parseRuntimeCommand(cmd: string): ParsedRuntime {
   }
 
   runtime.extraArgs = extra.map(quoteArg).join(" ");
-  return { kind: "llama-server", runtime };
+  return { kind: "llama-server", runtime, mlxRuntime };
 }
 
 export function buildLlamaServerCommand(runtime: LlamaServerRuntime): string {
@@ -242,6 +426,36 @@ export function buildLlamaServerCommand(runtime: LlamaServerRuntime): string {
   appendValue(args, "--cache-type-k", runtime.cacheTypeK);
   appendValue(args, "--cache-type-v", runtime.cacheTypeV);
   if (runtime.noWarmup) args.push("--no-warmup");
+
+  const command = args.map(quoteArg).join(" ");
+  return runtime.extraArgs.trim() ? `${command} ${runtime.extraArgs.trim()}` : command;
+}
+
+export function buildMLXServerCommand(runtime: MLXServerRuntime): string {
+  const args: string[] = [runtime.executable || "/Users/rick/.local/bin/mlx_lm.server"];
+  appendValue(args, "--host", runtime.host);
+  appendValue(args, "--port", runtime.port);
+  appendValue(args, "--model", runtime.modelPath);
+  appendValue(args, "--adapter-path", runtime.adapterPath);
+  appendValue(args, "--allowed-origins", runtime.allowedOrigins);
+  appendValue(args, "--draft-model", runtime.draftModel);
+  appendValue(args, "--num-draft-tokens", runtime.numDraftTokens);
+  appendBoolean(args, "--trust-remote-code", runtime.trustRemoteCode);
+  appendValue(args, "--log-level", runtime.logLevel);
+  appendValue(args, "--chat-template", runtime.chatTemplate);
+  appendBoolean(args, "--use-default-chat-template", runtime.useDefaultChatTemplate);
+  appendValue(args, "--temp", runtime.temp);
+  appendValue(args, "--top-p", runtime.topP);
+  appendValue(args, "--top-k", runtime.topK);
+  appendValue(args, "--min-p", runtime.minP);
+  appendValue(args, "--max-tokens", runtime.maxTokens);
+  appendValue(args, "--chat-template-args", runtime.chatTemplateArgs);
+  appendValue(args, "--decode-concurrency", runtime.decodeConcurrency);
+  appendValue(args, "--prompt-concurrency", runtime.promptConcurrency);
+  appendValue(args, "--prefill-step-size", runtime.prefillStepSize);
+  appendValue(args, "--prompt-cache-size", runtime.promptCacheSize);
+  appendValue(args, "--prompt-cache-bytes", runtime.promptCacheBytes);
+  appendBoolean(args, "--pipeline", runtime.pipeline);
 
   const command = args.map(quoteArg).join(" ");
   return runtime.extraArgs.trim() ? `${command} ${runtime.extraArgs.trim()}` : command;

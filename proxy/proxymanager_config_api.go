@@ -204,7 +204,7 @@ func (pm *ProxyManager) inspectModelForEditableConfig(model editableModelConfig)
 	if !ok {
 		return nil
 	}
-	info, err := inspectGGUFModel(modelPath)
+	info, err := inspectLocalModelPath(modelPath)
 	if err != nil {
 		return &ggufModelInfo{
 			Path:     modelPath,
@@ -231,7 +231,7 @@ func (pm *ProxyManager) apiInspectEditableModel(c *gin.Context) {
 		return
 	}
 
-	info, err := inspectGGUFModel(modelPath)
+	info, err := inspectLocalModelPath(modelPath)
 	if err != nil {
 		c.JSON(http.StatusOK, ggufModelInfo{
 			Path:     modelPath,

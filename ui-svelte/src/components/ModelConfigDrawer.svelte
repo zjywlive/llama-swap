@@ -2,7 +2,15 @@
   import { fetchEditableModel, inspectEditableModelPath, saveEditableModel, validateEditableModel } from "../stores/api";
   import { tx } from "../stores/i18n";
   import type { EditableModelConfig, EditableModelInfo } from "../lib/types";
-  import { buildLlamaServerCommand, defaultRuntime, parseRuntimeCommand, type LlamaServerRuntime } from "../lib/modelConfig";
+  import {
+    buildLlamaServerCommand,
+    buildMLXServerCommand,
+    defaultMLXRuntime,
+    defaultRuntime,
+    parseRuntimeCommand,
+    type LlamaServerRuntime,
+    type MLXServerRuntime,
+  } from "../lib/modelConfig";
   import SliderNumber from "./SliderNumber.svelte";
 
   interface Props {
@@ -17,8 +25,9 @@
   let activeTab = $state<Tab>("basic");
   let loadedModelId = $state<string | null>(null);
   let config = $state<EditableModelConfig | null>(null);
-  let runtimeKind = $state<"llama-server" | "raw">("raw");
+  let runtimeKind = $state<"llama-server" | "mlx-lm" | "raw">("raw");
   let runtime = $state<LlamaServerRuntime>(defaultRuntime());
+  let mlxRuntime = $state<MLXServerRuntime>(defaultMLXRuntime());
   let modelInfo = $state<EditableModelInfo | null>(null);
   let rawCommand = $state("");
   let aliasesText = $state("");
@@ -31,7 +40,7 @@
   let error = $state<string | null>(null);
   let message = $state<string | null>(null);
 
-  let commandPreview = $derived(runtimeKind === "llama-server" ? buildLlamaServerCommand(runtime) : rawCommand);
+  let commandPreview = $derived(runtimeKind === "llama-server" ? buildLlamaServerCommand(runtime) : runtimeKind === "mlx-lm" ? buildMLXServerCommand(mlxRuntime) : rawCommand);
   let contextMax = $derived(modelInfo?.limits?.contextMax || 131072);
   let gpuLayerMax = $derived(modelInfo?.limits?.gpuLayerMax || 128);
   let batchMax = $derived(modelInfo?.limits?.batchMax || Math.min(contextMax, 8192));
@@ -65,10 +74,13 @@
       const parsed = parseRuntimeCommand(loaded.cmd);
       runtimeKind = parsed.kind;
       runtime = parsed.runtime;
+      mlxRuntime = parsed.mlxRuntime;
       rawCommand = loaded.cmd;
       modelInfo = loaded.modelInfo ?? null;
       if (parsed.kind === "llama-server" && parsed.runtime.modelPath && !loaded.modelInfo) {
         void inspectModelPath(parsed.runtime.modelPath);
+      } else if (parsed.kind === "mlx-lm" && parsed.mlxRuntime.modelPath && !loaded.modelInfo) {
+        void inspectModelPath(parsed.mlxRuntime.modelPath);
       }
     } catch (err) {
       error = err instanceof Error ? err.message : $tx.editor.loadingFailed;
@@ -131,11 +143,14 @@
       modelInfo = {
         path: trimmed,
         exists: false,
+        backend: "",
         format: "",
         version: 0,
         name: "",
         architecture: "",
+        modelType: "",
         quantization: "",
+        torchDtype: "",
         fileType: 0,
         contextLength: 0,
         blockCount: 0,
@@ -156,6 +171,12 @@
 
   function maxHelp(label: string, max: number): string {
     return `${label}: <= ${max.toLocaleString()}. ${$tx.editor.help.runtimeLimited}`;
+  }
+
+  function runtimeHelp(): string {
+    if (runtimeKind === "llama-server") return $tx.editor.help.runtimeAuto;
+    if (runtimeKind === "mlx-lm") return $tx.editor.help.runtimeMLX;
+    return $tx.editor.help.runtimeRaw;
   }
 
   async function validate(): Promise<void> {
@@ -254,15 +275,15 @@
           </div>
         {:else if activeTab === "runtime"}
           <div class="mb-4 rounded border border-border bg-card p-3 text-sm text-txtsecondary">
-            {runtimeKind === "llama-server" ? $tx.editor.help.runtimeAuto : $tx.editor.help.runtimeRaw}
+            {runtimeHelp()}
           </div>
 
-          {#if runtimeKind === "llama-server"}
+          {#if runtimeKind !== "raw"}
             <div class="mb-4 rounded border border-border bg-card p-3 text-sm">
               <div class="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                 <h3 class="p-0 text-base">{$tx.editor.modelInfo.title}</h3>
                 {#if modelInfo?.format}
-                  <span class="text-xs uppercase text-txtsecondary">{modelInfo.format} v{modelInfo.version}</span>
+                  <span class="text-xs uppercase text-txtsecondary">{modelInfo.backend || runtimeKind} · {modelInfo.format}{modelInfo.version ? ` v${modelInfo.version}` : ""}</span>
                 {/if}
               </div>
               {#if modelInfo?.warnings?.length}
@@ -273,14 +294,14 @@
                 </div>
               {:else if modelInfo}
                 <div class="grid gap-2 text-txtsecondary md:grid-cols-2">
-                  <p>{modelInfo.architecture || $tx.editor.modelInfo.unknown} {modelInfo.quantization ? `· ${modelInfo.quantization}` : ""}</p>
+                  <p>{modelInfo.architecture || modelInfo.modelType || $tx.editor.modelInfo.unknown} {modelInfo.quantization ? `· ${modelInfo.quantization}` : ""}</p>
                   <p>{$tx.editor.modelInfo.context}: {numberOrUnknown(modelInfo.contextLength)}</p>
                   <p>{$tx.editor.modelInfo.layers}: {numberOrUnknown(modelInfo.blockCount)}</p>
                   <p>{$tx.editor.modelInfo.heads}: {numberOrUnknown(modelInfo.headCount)} / KV {numberOrUnknown(modelInfo.headCountKV)}</p>
                   <p>{$tx.editor.modelInfo.vocab}: {numberOrUnknown(modelInfo.vocabularySize)}</p>
                 </div>
               {:else}
-                <p class="text-txtsecondary">{$tx.editor.help.noModelLimits}</p>
+                <p class="text-txtsecondary">{runtimeKind === "mlx-lm" ? $tx.editor.help.noMLXInfo : $tx.editor.help.noModelLimits}</p>
               {/if}
             </div>
           {/if}
@@ -343,6 +364,90 @@
               <label class="block md:col-span-2">
                 <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.extraArgs}</span>
                 <textarea class="min-h-20 w-full rounded border border-border bg-card px-3 py-2 font-mono text-sm" bind:value={runtime.extraArgs}></textarea>
+              </label>
+            </div>
+          {:else if runtimeKind === "mlx-lm"}
+            <div class="grid gap-4 md:grid-cols-2">
+              <label class="block">
+                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.executable}</span>
+                <input class="w-full rounded border border-border bg-card px-3 py-2" bind:value={mlxRuntime.executable} />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.modelPath}</span>
+                <input
+                  class="w-full rounded border border-border bg-card px-3 py-2"
+                  bind:value={mlxRuntime.modelPath}
+                  onchange={() => inspectModelPath(mlxRuntime.modelPath)}
+                />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.host}</span>
+                <input class="w-full rounded border border-border bg-card px-3 py-2" bind:value={mlxRuntime.host} />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.port}</span>
+                <input class="w-full rounded border border-border bg-card px-3 py-2" bind:value={mlxRuntime.port} />
+              </label>
+              <SliderNumber label={$tx.editor.fields.maxTokens} bind:value={mlxRuntime.maxTokens} min={1} max={Math.max(contextMax || 8192, 8192)} step={128} help={`${$tx.editor.fields.maxTokens}: <= ${Math.max(contextMax || 8192, 8192).toLocaleString()}`} />
+              <SliderNumber label={$tx.editor.fields.temp} bind:value={mlxRuntime.temp} min={0} max={2} step={0.05} allowEmpty={false} />
+              <SliderNumber label={$tx.editor.fields.topP} bind:value={mlxRuntime.topP} min={0} max={1} step={0.05} allowEmpty={false} />
+              <SliderNumber label={$tx.editor.fields.topK} bind:value={mlxRuntime.topK} min={0} max={200} step={1} />
+              <SliderNumber label={$tx.editor.fields.minP} bind:value={mlxRuntime.minP} min={0} max={1} step={0.01} />
+              <SliderNumber label={$tx.editor.fields.numDraftTokens} bind:value={mlxRuntime.numDraftTokens} min={1} max={16} step={1} />
+              <SliderNumber label={$tx.editor.fields.decodeConcurrency} bind:value={mlxRuntime.decodeConcurrency} min={1} max={64} step={1} />
+              <SliderNumber label={$tx.editor.fields.promptConcurrency} bind:value={mlxRuntime.promptConcurrency} min={1} max={32} step={1} />
+              <SliderNumber label={$tx.editor.fields.prefillStepSize} bind:value={mlxRuntime.prefillStepSize} min={128} max={Math.max(contextMax || 8192, 8192)} step={128} />
+              <SliderNumber label={$tx.editor.fields.promptCacheSize} bind:value={mlxRuntime.promptCacheSize} min={0} max={64} step={1} />
+              <label class="block">
+                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.promptCacheBytes}</span>
+                <input class="w-full rounded border border-border bg-card px-3 py-2" placeholder="4G" bind:value={mlxRuntime.promptCacheBytes} />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.logLevel}</span>
+                <select class="w-full rounded border border-border bg-card px-3 py-2" bind:value={mlxRuntime.logLevel}>
+                  <option value=""></option>
+                  <option value="DEBUG">DEBUG</option>
+                  <option value="INFO">INFO</option>
+                  <option value="WARNING">WARNING</option>
+                  <option value="ERROR">ERROR</option>
+                  <option value="CRITICAL">CRITICAL</option>
+                </select>
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.allowedOrigins}</span>
+                <input class="w-full rounded border border-border bg-card px-3 py-2" placeholder="*" bind:value={mlxRuntime.allowedOrigins} />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.adapterPath}</span>
+                <input class="w-full rounded border border-border bg-card px-3 py-2" bind:value={mlxRuntime.adapterPath} />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.draftModel}</span>
+                <input class="w-full rounded border border-border bg-card px-3 py-2" bind:value={mlxRuntime.draftModel} />
+              </label>
+              <label class="block md:col-span-2">
+                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.chatTemplate}</span>
+                <textarea class="min-h-20 w-full rounded border border-border bg-card px-3 py-2 font-mono text-sm" bind:value={mlxRuntime.chatTemplate}></textarea>
+              </label>
+              <label class="block md:col-span-2">
+                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.chatTemplateArgs}</span>
+                <input class="w-full rounded border border-border bg-card px-3 py-2 font-mono text-sm" placeholder={'{"enable_thinking":false}'} bind:value={mlxRuntime.chatTemplateArgs} />
+              </label>
+              <label class="flex items-center gap-2">
+                <input type="checkbox" bind:checked={mlxRuntime.trustRemoteCode} />
+                <span>{$tx.editor.fields.trustRemoteCode}</span>
+              </label>
+              <label class="flex items-center gap-2">
+                <input type="checkbox" bind:checked={mlxRuntime.useDefaultChatTemplate} />
+                <span>{$tx.editor.fields.useDefaultChatTemplate}</span>
+              </label>
+              <label class="flex items-center gap-2">
+                <input type="checkbox" bind:checked={mlxRuntime.pipeline} />
+                <span>{$tx.editor.fields.pipeline}</span>
+              </label>
+              <label class="block md:col-span-2">
+                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.extraArgs}</span>
+                <textarea class="min-h-20 w-full rounded border border-border bg-card px-3 py-2 font-mono text-sm" bind:value={mlxRuntime.extraArgs}></textarea>
               </label>
             </div>
           {:else}

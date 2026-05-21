@@ -39,11 +39,14 @@ export interface EditableModelLimits {
 export interface EditableModelInfo {
   path: string;
   exists: boolean;
+  backend: "llama-server" | "mlx-lm" | "";
   format: string;
   version: number;
   name: string;
   architecture: string;
+  modelType: string;
   quantization: string;
+  torchDtype: string;
   fileType: number;
   contextLength: number;
   blockCount: number;
@@ -83,9 +86,11 @@ export interface EditableModelsResponse {
   models: EditableModelConfig[];
 }
 
-export interface ScannedGGUFModel {
+export interface ScannedLocalModel {
   path: string;
   name: string;
+  backend: "llama-server" | "mlx-lm";
+  format: "gguf" | "mlx" | string;
   idSuggestion: string;
   imported: boolean;
   existingId: string;
@@ -95,7 +100,7 @@ export interface ScannedGGUFModel {
 
 export interface ScanLocalModelsResponse {
   dir: string;
-  models: ScannedGGUFModel[];
+  models: ScannedLocalModel[];
   warnings: string[];
 }
 
