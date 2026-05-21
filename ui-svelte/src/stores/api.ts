@@ -7,10 +7,11 @@ import type {
   APIEventEnvelope,
   ReqRespCapture,
   InFlightStats,
-	  PerformanceResponse,
-	  EditableModelConfig,
-	  EditableModelsResponse,
-	} from "../lib/types";
+  PerformanceResponse,
+  EditableModelConfig,
+  EditableModelInfo,
+  EditableModelsResponse,
+} from "../lib/types";
 import { connectionState } from "./theme";
 
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
@@ -238,6 +239,18 @@ export async function saveEditableModel(model: EditableModelConfig): Promise<voi
   if (!response.ok) {
     throw new Error(await readError(response));
   }
+}
+
+export async function inspectEditableModelPath(path: string): Promise<EditableModelInfo> {
+  const response = await fetch("/api/config/inspect-model", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+  return await response.json();
 }
 
 export async function getCapture(id: number): Promise<ReqRespCapture | null> {

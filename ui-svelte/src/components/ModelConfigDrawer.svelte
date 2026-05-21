@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { fetchEditableModel, saveEditableModel, validateEditableModel } from "../stores/api";
+  import { fetchEditableModel, inspectEditableModelPath, saveEditableModel, validateEditableModel } from "../stores/api";
   import { tx } from "../stores/i18n";
-  import type { EditableModelConfig } from "../lib/types";
+  import type { EditableModelConfig, EditableModelInfo } from "../lib/types";
   import { buildLlamaServerCommand, defaultRuntime, parseRuntimeCommand, type LlamaServerRuntime } from "../lib/modelConfig";
+  import SliderNumber from "./SliderNumber.svelte";
 
   interface Props {
     modelId: string | null;
@@ -18,6 +19,7 @@
   let config = $state<EditableModelConfig | null>(null);
   let runtimeKind = $state<"llama-server" | "raw">("raw");
   let runtime = $state<LlamaServerRuntime>(defaultRuntime());
+  let modelInfo = $state<EditableModelInfo | null>(null);
   let rawCommand = $state("");
   let aliasesText = $state("");
   let envText = $state("");
@@ -30,6 +32,12 @@
   let message = $state<string | null>(null);
 
   let commandPreview = $derived(runtimeKind === "llama-server" ? buildLlamaServerCommand(runtime) : rawCommand);
+  let contextMax = $derived(modelInfo?.limits?.contextMax || 131072);
+  let gpuLayerMax = $derived(modelInfo?.limits?.gpuLayerMax || 128);
+  let batchMax = $derived(modelInfo?.limits?.batchMax || Math.min(contextMax, 8192));
+  let microBatchMax = $derived(modelInfo?.limits?.microBatchMax || batchMax);
+  let threadsMax = $derived(modelInfo?.limits?.threadsMax || (typeof navigator !== "undefined" ? navigator.hardwareConcurrency || 8 : 8));
+  let parallelMax = $derived(modelInfo?.limits?.parallelMax || 16);
 
   $effect(() => {
     if (modelId && modelId !== loadedModelId) {
@@ -58,6 +66,10 @@
       runtimeKind = parsed.kind;
       runtime = parsed.runtime;
       rawCommand = loaded.cmd;
+      modelInfo = loaded.modelInfo ?? null;
+      if (parsed.kind === "llama-server" && parsed.runtime.modelPath && !loaded.modelInfo) {
+        void inspectModelPath(parsed.runtime.modelPath);
+      }
     } catch (err) {
       error = err instanceof Error ? err.message : $tx.editor.loadingFailed;
     } finally {
@@ -105,6 +117,45 @@
     if (!config) return;
     const value = (event.target as HTMLSelectElement).value;
     config.sendLoadingState = value === "inherit" ? null : value === "true";
+  }
+
+  async function inspectModelPath(path: string): Promise<void> {
+    const trimmed = path.trim();
+    if (!trimmed || trimmed.includes("${")) {
+      modelInfo = null;
+      return;
+    }
+    try {
+      modelInfo = await inspectEditableModelPath(trimmed);
+    } catch (err) {
+      modelInfo = {
+        path: trimmed,
+        exists: false,
+        format: "",
+        version: 0,
+        name: "",
+        architecture: "",
+        quantization: "",
+        fileType: 0,
+        contextLength: 0,
+        blockCount: 0,
+        embeddingLength: 0,
+        feedForwardLength: 0,
+        headCount: 0,
+        headCountKV: 0,
+        vocabularySize: 0,
+        limits: { contextMax, gpuLayerMax, batchMax, microBatchMax, threadsMax, parallelMax },
+        warnings: [`${$tx.editor.inspectFailed}: ${err instanceof Error ? err.message : String(err)}`],
+      };
+    }
+  }
+
+  function numberOrUnknown(value: number): string {
+    return value > 0 ? value.toLocaleString() : $tx.editor.modelInfo.unknown;
+  }
+
+  function maxHelp(label: string, max: number): string {
+    return `${label}: <= ${max.toLocaleString()}. ${$tx.editor.help.runtimeLimited}`;
   }
 
   async function validate(): Promise<void> {
@@ -195,11 +246,7 @@
               <input class="w-full rounded border border-border bg-card px-3 py-2" bind:value={aliasesText} />
               <span class="mt-1 block text-xs text-txtsecondary">{$tx.editor.help.aliases}</span>
             </label>
-            <label class="block">
-              <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.ttl}</span>
-              <input type="number" min="0" class="w-full rounded border border-border bg-card px-3 py-2" bind:value={config.ttl} />
-              <span class="mt-1 block text-xs text-txtsecondary">{$tx.editor.help.ttl}</span>
-            </label>
+            <SliderNumber label={$tx.editor.fields.ttl} bind:value={config.ttl} min={-1} max={86400} step={30} help={$tx.editor.help.ttl} allowEmpty={false} />
             <label class="mt-7 flex items-center gap-2">
               <input type="checkbox" bind:checked={config.unlisted} />
               <span>{$tx.editor.fields.unlisted}</span>
@@ -211,6 +258,34 @@
           </div>
 
           {#if runtimeKind === "llama-server"}
+            <div class="mb-4 rounded border border-border bg-card p-3 text-sm">
+              <div class="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                <h3 class="p-0 text-base">{$tx.editor.modelInfo.title}</h3>
+                {#if modelInfo?.format}
+                  <span class="text-xs uppercase text-txtsecondary">{modelInfo.format} v{modelInfo.version}</span>
+                {/if}
+              </div>
+              {#if modelInfo?.warnings?.length}
+                <div class="space-y-1 text-yellow-600 dark:text-yellow-300">
+                  {#each modelInfo.warnings as warning}
+                    <p>{warning}</p>
+                  {/each}
+                </div>
+              {:else if modelInfo}
+                <div class="grid gap-2 text-txtsecondary md:grid-cols-2">
+                  <p>{modelInfo.architecture || $tx.editor.modelInfo.unknown} {modelInfo.quantization ? `· ${modelInfo.quantization}` : ""}</p>
+                  <p>{$tx.editor.modelInfo.context}: {numberOrUnknown(modelInfo.contextLength)}</p>
+                  <p>{$tx.editor.modelInfo.layers}: {numberOrUnknown(modelInfo.blockCount)}</p>
+                  <p>{$tx.editor.modelInfo.heads}: {numberOrUnknown(modelInfo.headCount)} / KV {numberOrUnknown(modelInfo.headCountKV)}</p>
+                  <p>{$tx.editor.modelInfo.vocab}: {numberOrUnknown(modelInfo.vocabularySize)}</p>
+                </div>
+              {:else}
+                <p class="text-txtsecondary">{$tx.editor.help.noModelLimits}</p>
+              {/if}
+            </div>
+          {/if}
+
+          {#if runtimeKind === "llama-server"}
             <div class="grid gap-4 md:grid-cols-2">
               <label class="block">
                 <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.executable}</span>
@@ -218,7 +293,11 @@
               </label>
               <label class="block">
                 <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.modelPath}</span>
-                <input class="w-full rounded border border-border bg-card px-3 py-2" bind:value={runtime.modelPath} />
+                <input
+                  class="w-full rounded border border-border bg-card px-3 py-2"
+                  bind:value={runtime.modelPath}
+                  onchange={() => inspectModelPath(runtime.modelPath)}
+                />
               </label>
               <label class="block">
                 <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.host}</span>
@@ -228,42 +307,18 @@
                 <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.port}</span>
                 <input class="w-full rounded border border-border bg-card px-3 py-2" bind:value={runtime.port} />
               </label>
-              <label class="block">
-                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.ctxSize}</span>
-                <input type="number" min="0" class="w-full rounded border border-border bg-card px-3 py-2" bind:value={runtime.ctxSize} />
-              </label>
-              <label class="block">
-                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.threads}</span>
-                <input type="number" class="w-full rounded border border-border bg-card px-3 py-2" bind:value={runtime.threads} />
-              </label>
-              <label class="block">
-                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.threadsBatch}</span>
-                <input type="number" class="w-full rounded border border-border bg-card px-3 py-2" bind:value={runtime.threadsBatch} />
-              </label>
-              <label class="block">
-                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.batchSize}</span>
-                <input type="number" class="w-full rounded border border-border bg-card px-3 py-2" bind:value={runtime.batchSize} />
-              </label>
-              <label class="block">
-                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.ubatchSize}</span>
-                <input type="number" class="w-full rounded border border-border bg-card px-3 py-2" bind:value={runtime.ubatchSize} />
-              </label>
-              <label class="block">
-                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.parallel}</span>
-                <input type="number" class="w-full rounded border border-border bg-card px-3 py-2" bind:value={runtime.parallel} />
-              </label>
-              <label class="block">
-                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.priority}</span>
-                <input type="number" class="w-full rounded border border-border bg-card px-3 py-2" bind:value={runtime.priority} />
-              </label>
+              <SliderNumber label={$tx.editor.fields.ctxSize} bind:value={runtime.ctxSize} min={512} max={contextMax} step={512} help={maxHelp($tx.editor.fields.ctxSize, contextMax)} />
+              <SliderNumber label={$tx.editor.fields.threads} bind:value={runtime.threads} min={1} max={threadsMax} step={1} help={maxHelp($tx.editor.fields.threads, threadsMax)} />
+              <SliderNumber label={$tx.editor.fields.threadsBatch} bind:value={runtime.threadsBatch} min={1} max={threadsMax} step={1} help={maxHelp($tx.editor.fields.threadsBatch, threadsMax)} />
+              <SliderNumber label={$tx.editor.fields.batchSize} bind:value={runtime.batchSize} min={32} max={batchMax} step={32} help={maxHelp($tx.editor.fields.batchSize, batchMax)} />
+              <SliderNumber label={$tx.editor.fields.ubatchSize} bind:value={runtime.ubatchSize} min={32} max={microBatchMax} step={32} help={maxHelp($tx.editor.fields.ubatchSize, microBatchMax)} />
+              <SliderNumber label={$tx.editor.fields.parallel} bind:value={runtime.parallel} min={1} max={parallelMax} step={1} help={maxHelp($tx.editor.fields.parallel, parallelMax)} />
+              <SliderNumber label={$tx.editor.fields.priority} bind:value={runtime.priority} min={-3} max={3} step={1} help="-3..3" />
               <label class="block">
                 <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.device}</span>
                 <input class="w-full rounded border border-border bg-card px-3 py-2" placeholder="none / auto / Metal" bind:value={runtime.device} />
               </label>
-              <label class="block">
-                <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.gpuLayers}</span>
-                <input class="w-full rounded border border-border bg-card px-3 py-2" placeholder="auto / all / 0 / 99" bind:value={runtime.gpuLayers} />
-              </label>
+              <SliderNumber label={$tx.editor.fields.gpuLayers} bind:value={runtime.gpuLayers} min={0} max={gpuLayerMax} step={1} help={maxHelp($tx.editor.fields.gpuLayers, gpuLayerMax)} />
               <label class="block">
                 <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.flashAttn}</span>
                 <select class="w-full rounded border border-border bg-card px-3 py-2" bind:value={runtime.flashAttention}>
@@ -332,10 +387,7 @@
               <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.checkEndpoint}</span>
               <input class="w-full rounded border border-border bg-card px-3 py-2" bind:value={config.checkEndpoint} />
             </label>
-            <label class="block">
-              <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.concurrencyLimit}</span>
-              <input type="number" min="0" class="w-full rounded border border-border bg-card px-3 py-2" bind:value={config.concurrencyLimit} />
-            </label>
+            <SliderNumber label={$tx.editor.fields.concurrencyLimit} bind:value={config.concurrencyLimit} min={0} max={64} step={1} allowEmpty={false} />
             <label class="block md:col-span-2">
               <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.cmdStop}</span>
               <input class="w-full rounded border border-border bg-card px-3 py-2 font-mono text-sm" bind:value={config.cmdStop} />

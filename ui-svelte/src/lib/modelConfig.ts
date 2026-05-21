@@ -11,7 +11,7 @@ export interface LlamaServerRuntime {
   parallel: number | "";
   priority: number | "";
   device: string;
-  gpuLayers: string;
+  gpuLayers: number | "";
   flashAttention: "" | "auto" | "on" | "off";
   noWarmup: boolean;
   cacheTypeK: string;
@@ -179,7 +179,14 @@ export function parseRuntimeCommand(cmd: string): ParsedRuntime {
       case "--gpu-layers":
       case "--n-gpu-layers":
       case "-ngl":
-        runtime.gpuLayers = value ?? "";
+        {
+          const parsed = asNumber(value);
+          if (parsed === "" && value) {
+            extra.push(flag, value);
+          } else {
+            runtime.gpuLayers = parsed;
+          }
+        }
         consume();
         break;
       case "--flash-attn":

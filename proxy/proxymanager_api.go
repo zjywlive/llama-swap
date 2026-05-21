@@ -36,6 +36,7 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.GET("/config/models/*model", pm.apiGetEditableModel)
 		apiGroup.PUT("/config/models/*model", pm.apiSaveEditableModel)
 		apiGroup.POST("/config/validate", pm.apiValidateEditableModel)
+		apiGroup.POST("/config/inspect-model", pm.apiInspectEditableModel)
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
 		apiGroup.GET("/performance", pm.apiGetPerformance)

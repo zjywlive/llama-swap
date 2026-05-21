@@ -27,6 +27,35 @@ export interface EditableModelFilters {
   setParamsByID: Record<string, Record<string, unknown>>;
 }
 
+export interface EditableModelLimits {
+  contextMax: number;
+  gpuLayerMax: number;
+  batchMax: number;
+  microBatchMax: number;
+  threadsMax: number;
+  parallelMax: number;
+}
+
+export interface EditableModelInfo {
+  path: string;
+  exists: boolean;
+  format: string;
+  version: number;
+  name: string;
+  architecture: string;
+  quantization: string;
+  fileType: number;
+  contextLength: number;
+  blockCount: number;
+  embeddingLength: number;
+  feedForwardLength: number;
+  headCount: number;
+  headCountKV: number;
+  vocabularySize: number;
+  limits: EditableModelLimits;
+  warnings: string[];
+}
+
 export interface EditableModelConfig {
   id: string;
   cmd: string;
@@ -45,6 +74,7 @@ export interface EditableModelConfig {
   filters: EditableModelFilters;
   metadata: Record<string, unknown>;
   timeouts: EditableTimeoutsConfig;
+  modelInfo?: EditableModelInfo | null;
 }
 
 export interface EditableModelsResponse {

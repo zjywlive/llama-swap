@@ -47,12 +47,17 @@ type editableModelConfig struct {
 	Filters          editableModelFilters   `json:"filters"`
 	Metadata         map[string]any         `json:"metadata"`
 	Timeouts         editableTimeoutsConfig `json:"timeouts"`
+	ModelInfo        *ggufModelInfo         `json:"modelInfo,omitempty"`
 }
 
 type editableModelsResponse struct {
 	ConfigPath     string                `json:"configPath"`
 	EditingEnabled bool                  `json:"editingEnabled"`
 	Models         []editableModelConfig `json:"models"`
+}
+
+type inspectModelRequest struct {
+	Path string `json:"path"`
 }
 
 func (pm *ProxyManager) requireConfigEditing(c *gin.Context) bool {
@@ -189,7 +194,53 @@ func (pm *ProxyManager) editableModelFromRawConfig(modelID string) (editableMode
 	if err := modelNode.Decode(&modelConfig); err != nil {
 		return editableModelConfig{}, fmt.Errorf("decode model %s: %w", modelID, err)
 	}
-	return editableFromModelConfig(modelID, modelConfig), nil
+	editable := editableFromModelConfig(modelID, modelConfig)
+	editable.ModelInfo = pm.inspectModelForEditableConfig(editable)
+	return editable, nil
+}
+
+func (pm *ProxyManager) inspectModelForEditableConfig(model editableModelConfig) *ggufModelInfo {
+	modelPath, ok := modelPathFromCommand(model.Cmd)
+	if !ok {
+		return nil
+	}
+	info, err := inspectGGUFModel(modelPath)
+	if err != nil {
+		return &ggufModelInfo{
+			Path:     modelPath,
+			Warnings: []string{err.Error()},
+		}
+	}
+	return info
+}
+
+func (pm *ProxyManager) apiInspectEditableModel(c *gin.Context) {
+	if !pm.requireConfigEditing(c) {
+		return
+	}
+
+	var request inspectModelRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	modelPath := strings.TrimSpace(request.Path)
+	if modelPath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model path is required"})
+		return
+	}
+
+	info, err := inspectGGUFModel(modelPath)
+	if err != nil {
+		c.JSON(http.StatusOK, ggufModelInfo{
+			Path:     modelPath,
+			Warnings: []string{err.Error()},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, info)
 }
 
 func (pm *ProxyManager) apiValidateEditableModel(c *gin.Context) {
@@ -278,6 +329,9 @@ func (pm *ProxyManager) apiSaveEditableModel(c *gin.Context) {
 func (pm *ProxyManager) renderConfigWithModel(modelID string, model editableModelConfig) ([]byte, error) {
 	if strings.TrimSpace(model.Cmd) == "" {
 		return nil, fmt.Errorf("cmd is required")
+	}
+	if err := validateGGUFRuntimeLimits(model.Cmd); err != nil {
+		return nil, err
 	}
 
 	source, err := os.ReadFile(pm.configPath)
