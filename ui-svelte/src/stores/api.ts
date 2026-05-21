@@ -7,8 +7,10 @@ import type {
   APIEventEnvelope,
   ReqRespCapture,
   InFlightStats,
-  PerformanceResponse,
-} from "../lib/types";
+	  PerformanceResponse,
+	  EditableModelConfig,
+	  EditableModelsResponse,
+	} from "../lib/types";
 import { connectionState } from "./theme";
 
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
@@ -187,6 +189,54 @@ export async function loadModel(model: string): Promise<void> {
   } catch (error) {
     console.error("Failed to load model:", error);
     throw error;
+  }
+}
+
+async function readError(response: Response): Promise<string> {
+  try {
+    const data = await response.json();
+    if (typeof data?.error === "string") return data.error;
+  } catch {
+    // ignore JSON parse errors and fall back to status text
+  }
+  return `${response.status} ${response.statusText}`;
+}
+
+export async function fetchEditableModels(): Promise<EditableModelsResponse> {
+  const response = await fetch("/api/config/models");
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+  return await response.json();
+}
+
+export async function fetchEditableModel(model: string): Promise<EditableModelConfig> {
+  const response = await fetch(`/api/config/models/${model}`);
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+  return await response.json();
+}
+
+export async function validateEditableModel(model: EditableModelConfig): Promise<void> {
+  const response = await fetch("/api/config/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(model),
+  });
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+}
+
+export async function saveEditableModel(model: EditableModelConfig): Promise<void> {
+  const response = await fetch(`/api/config/models/${model.id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(model),
+  });
+  if (!response.ok) {
+    throw new Error(await readError(response));
   }
 }
 

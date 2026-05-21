@@ -3,6 +3,7 @@
   import { persistentStore } from "../../stores/persistent";
   import { rerank } from "../../lib/rerankApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
+  import { tx } from "../../stores/i18n";
   import ModelSelector from "./ModelSelector.svelte";
 
   type RerankRow = { doc: string; score: number | null };
@@ -264,7 +265,7 @@
 <div class="flex flex-col h-full">
   <!-- Top bar: model selector + query input (table mode) + mode toggle -->
   <div class="shrink-0 flex flex-wrap gap-2 mb-4">
-    <ModelSelector bind:value={$selectedModelStore} placeholder="Select a rerank model..." disabled={isLoading} />
+    <ModelSelector bind:value={$selectedModelStore} placeholder={$tx.playground.selectRerankModel} disabled={isLoading} />
     {#if editorMode === "table"}
       <input
         type="text"
@@ -300,7 +301,7 @@
 
   {#if !hasModels}
     <div class="flex-1 flex items-center justify-center text-txtsecondary">
-      <p>No models configured. Add models to your configuration to use reranking.</p>
+      <p>{$tx.playground.noModelsChat}</p>
     </div>
   {:else if editorMode === "json"}
     <!-- JSON editor -->

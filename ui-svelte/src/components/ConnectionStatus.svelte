@@ -1,6 +1,7 @@
 <script lang="ts">
   import { connectionState } from "../stores/theme";
   import { versionInfo } from "../stores/api";
+  import { tx } from "../stores/i18n";
 
   let eventStatusColor = $derived.by(() => {
     switch ($connectionState) {
@@ -15,7 +16,7 @@
   });
 
   let tooltipText = $derived(
-    `Event Stream: ${$connectionState ?? "unknown"}\nAPI Version: ${$versionInfo?.version ?? "unknown"}\nCommit Hash: ${$versionInfo?.commit?.substring(0, 7) ?? "unknown"}\nBuild Date: ${$versionInfo?.build_date ?? "unknown"}`
+    `${$tx.connection.eventStream}: ${$connectionState ?? "unknown"}\n${$tx.connection.apiVersion}: ${$versionInfo?.version ?? "unknown"}\n${$tx.connection.commitHash}: ${$versionInfo?.commit?.substring(0, 7) ?? "unknown"}\n${$tx.connection.buildDate}: ${$versionInfo?.build_date ?? "unknown"}`
   );
 </script>
 

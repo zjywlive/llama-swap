@@ -36,6 +36,7 @@ func main() {
 	keyFile := flag.String("tls-key-file", "", "TLS key file")
 	showVersion := flag.Bool("version", false, "show version of build")
 	watchConfig := flag.Bool("watch-config", false, "Automatically reload config file on change")
+	allowConfigEdit := flag.Bool("allow-config-edit", false, "Allow the web UI to edit and write the config file")
 	mainLogger := logmon.New()
 
 	flag.Parse() // Parse the command-line flags
@@ -149,6 +150,8 @@ func main() {
 				mon.UpdateConfig(conf.Performance)
 			}
 			newPM := proxy.New(conf)
+			newPM.SetConfigPath(*configPath)
+			newPM.SetConfigEditingEnabled(*allowConfigEdit)
 			newPM.SetVersion(date, commit, version)
 			newPM.SetPerfMonitor(mon)
 			srv.Handler = newPM
@@ -167,6 +170,8 @@ func main() {
 				os.Exit(1)
 			}
 			newPM := proxy.New(conf)
+			newPM.SetConfigPath(*configPath)
+			newPM.SetConfigEditingEnabled(*allowConfigEdit)
 			newPM.SetVersion(date, commit, version)
 			newPM.SetPerfMonitor(mon)
 			srv.Handler = newPM

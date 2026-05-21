@@ -4,6 +4,7 @@
   import ModelsPanel from "../components/ModelsPanel.svelte";
   import LogPanel from "../components/LogPanel.svelte";
   import ResizablePanels from "../components/ResizablePanels.svelte";
+  import { tx } from "../stores/i18n";
 
   let direction = $derived<"horizontal" | "vertical">($isNarrow ? "vertical" : "horizontal");
 </script>
@@ -13,6 +14,6 @@
     <ModelsPanel />
   {/snippet}
   {#snippet rightPanel()}
-    <LogPanel id="modelsupstream" title="Upstream Logs" logData={$upstreamLogs} />
+    <LogPanel id="modelsupstream" title={$tx.logs.upstreamLogs} logData={$upstreamLogs} />
   {/snippet}
 </ResizablePanels>

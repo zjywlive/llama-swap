@@ -4,6 +4,7 @@
   import { generateImage } from "../../lib/imageApi";
   import { generateSdImage, fetchSdLoras } from "../../lib/sdApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
+  import { tx } from "../../stores/i18n";
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
   import type { ImageApiMode, SdApiLora, SdApiLoraRef } from "../../lib/types";
@@ -193,7 +194,7 @@
 <div class="flex flex-col h-full">
   <!-- Model selector and mode toggle -->
   <div class="shrink-0 flex flex-wrap gap-2 mb-4">
-    <ModelSelector bind:value={$selectedModelStore} placeholder="Select an image model..." disabled={isGenerating} />
+    <ModelSelector bind:value={$selectedModelStore} placeholder={$tx.playground.selectImageModel} disabled={isGenerating} />
 
     <select
       class="px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
@@ -230,7 +231,7 @@
         class="px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface hover:bg-secondary-hover transition-colors"
         onclick={() => showSettings = !showSettings}
       >
-        {showSettings ? "Hide Settings" : "Settings"}
+        {showSettings ? $tx.playground.hideSettings : $tx.playground.settings}
       </button>
     {/if}
   </div>

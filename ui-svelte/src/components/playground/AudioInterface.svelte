@@ -3,6 +3,7 @@
   import { persistentStore } from "../../stores/persistent";
   import { transcribeAudio } from "../../lib/audioApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
+  import { tx } from "../../stores/i18n";
   import ModelSelector from "./ModelSelector.svelte";
 
   const selectedModelStore = persistentStore<string>("playground-audio-model", "");
@@ -145,13 +146,13 @@
 <div class="flex flex-col h-full">
   <!-- Model selector -->
   <div class="shrink-0 flex flex-wrap gap-2 mb-4">
-    <ModelSelector bind:value={$selectedModelStore} placeholder="Select an audio model..." disabled={isTranscribing} />
+    <ModelSelector bind:value={$selectedModelStore} placeholder={$tx.playground.selectAudioModel} disabled={isTranscribing} />
   </div>
 
   <!-- Empty state for no models configured -->
   {#if !hasModels}
     <div class="flex-1 flex items-center justify-center text-txtsecondary">
-      <p>No models configured. Add models to your configuration to transcribe audio.</p>
+      <p>{$tx.playground.noModelsChat}</p>
     </div>
   {:else}
     <!-- File upload / Result display area -->

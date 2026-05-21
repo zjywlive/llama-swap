@@ -3,6 +3,7 @@
   import { persistentStore } from "../../stores/persistent";
   import { generateSpeech } from "../../lib/speechApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
+  import { tx } from "../../stores/i18n";
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
 
@@ -206,7 +207,7 @@
 <div class="flex flex-col h-full">
   <!-- Model and voice selectors -->
   <div class="shrink-0 flex gap-2 mb-4">
-    <ModelSelector bind:value={$selectedModelStore} placeholder="Select a speech model..." disabled={isGenerating} />
+    <ModelSelector bind:value={$selectedModelStore} placeholder={$tx.playground.selectAudioModel} disabled={isGenerating} />
     <div class="flex gap-2">
       <select
         class="shrink-0 px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
@@ -244,7 +245,7 @@
   <!-- Empty state for no models configured -->
   {#if !hasModels}
     <div class="flex-1 flex items-center justify-center text-txtsecondary">
-      <p>No models configured. Add models to your configuration to generate speech.</p>
+      <p>{$tx.playground.noModelsChat}</p>
     </div>
   {:else}
     <!-- Audio display area -->

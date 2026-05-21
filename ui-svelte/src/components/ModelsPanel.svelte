@@ -2,10 +2,13 @@
   import { models, loadModel, unloadAllModels, unloadSingleModel } from "../stores/api";
   import { isNarrow } from "../stores/theme";
   import { persistentStore } from "../stores/persistent";
+  import { tx } from "../stores/i18n";
   import type { Model } from "../lib/types";
+  import ModelConfigDrawer from "./ModelConfigDrawer.svelte";
 
   let isUnloading = $state(false);
   let menuOpen = $state(false);
+  let editingModelId = $state<string | null>(null);
 
   const showUnlistedStore = persistentStore<boolean>("showUnlisted", true);
   const showIdorNameStore = persistentStore<"id" | "name">("showIdorName", "id");
@@ -58,7 +61,7 @@
 <div class="card h-full flex flex-col">
   <div class="shrink-0">
     <div class="flex justify-between items-baseline">
-      <h2 class={$isNarrow ? "text-xl" : ""}>Models</h2>
+      <h2 class={$isNarrow ? "text-xl" : ""}>{$tx.models.title}</h2>
       {#if $isNarrow}
         <div class="relative">
           <button class="btn text-base flex items-center gap-2 py-1" onclick={() => (menuOpen = !menuOpen)} aria-label="Toggle menu">
@@ -75,7 +78,7 @@
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
                   <path fill-rule="evenodd" d="M15.97 2.47a.75.75 0 0 1 1.06 0l4.5 4.5a.75.75 0 0 1 0 1.06l-4.5 4.5a.75.75 0 1 1-1.06-1.06l3.22-3.22H7.5a.75.75 0 0 1 0-1.5h11.69l-3.22-3.22a.75.75 0 0 1 0-1.06Zm-7.94 9a.75.75 0 0 1 0 1.06l-3.22 3.22H16.5a.75.75 0 0 1 0 1.5H4.81l3.22 3.22a.75.75 0 1 1-1.06 1.06l-4.5-4.5a.75.75 0 0 1 0-1.06l4.5-4.5a.75.75 0 0 1 1.06 0Z" clip-rule="evenodd" />
                 </svg>
-                {$showIdorNameStore === "id" ? "Show Name" : "Show ID"}
+                {$showIdorNameStore === "id" ? $tx.models.showName : $tx.models.showId}
               </button>
               <button
                 class="w-full text-left px-4 py-2 hover:bg-secondary-hover flex items-center gap-2"
@@ -93,7 +96,7 @@
                     <path fill-rule="evenodd" d="M1.323 11.447C2.811 6.976 7.028 3.75 12.001 3.75c4.97 0 9.185 3.223 10.675 7.69.12.362.12.752 0 1.113-1.487 4.471-5.705 7.697-10.677 7.697-4.97 0-9.186-3.223-10.675-7.69a1.762 1.762 0 0 1 0-1.113ZM17.25 12a5.25 5.25 0 1 1-10.5 0 5.25 5.25 0 0 1 10.5 0Z" clip-rule="evenodd" />
                   </svg>
                 {/if}
-                {$showUnlistedStore ? "Hide Unlisted" : "Show Unlisted"}
+                {$showUnlistedStore ? $tx.models.hideUnlisted : $tx.models.showUnlisted}
               </button>
               <button
                 class="w-full text-left px-4 py-2 hover:bg-secondary-hover flex items-center gap-2"
@@ -103,7 +106,7 @@
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
                   <path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25Zm.53 5.47a.75.75 0 0 0-1.06 0l-3 3a.75.75 0 1 0 1.06 1.06l1.72-1.72v5.69a.75.75 0 0 0 1.5 0v-5.69l1.72 1.72a.75.75 0 1 0 1.06-1.06l-3-3Z" clip-rule="evenodd" />
                 </svg>
-                {isUnloading ? "Unloading..." : "Unload All"}
+                {isUnloading ? $tx.common.unloading : $tx.common.unloadAll}
               </button>
             </div>
           {/if}
@@ -117,7 +120,7 @@
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
               <path fill-rule="evenodd" d="M15.97 2.47a.75.75 0 0 1 1.06 0l4.5 4.5a.75.75 0 0 1 0 1.06l-4.5 4.5a.75.75 0 1 1-1.06-1.06l3.22-3.22H7.5a.75.75 0 0 1 0-1.5h11.69l-3.22-3.22a.75.75 0 0 1 0-1.06Zm-7.94 9a.75.75 0 0 1 0 1.06l-3.22 3.22H16.5a.75.75 0 0 1 0 1.5H4.81l3.22 3.22a.75.75 0 1 1-1.06 1.06l-4.5-4.5a.75.75 0 0 1 0-1.06l4.5-4.5a.75.75 0 0 1 1.06 0Z" clip-rule="evenodd" />
             </svg>
-            {$showIdorNameStore === "id" ? "ID" : "Name"}
+            {$showIdorNameStore === "id" ? $tx.models.id : $tx.models.name}
           </button>
 
           <button class="btn text-base flex items-center gap-2" onclick={toggleShowUnlisted} style="line-height: 1.2">
@@ -133,14 +136,14 @@
                 <path d="M6.75 12c0-.619.107-1.213.304-1.764l-3.1-3.1a11.25 11.25 0 0 0-2.63 4.31c-.12.362-.12.752 0 1.114 1.489 4.467 5.704 7.69 10.675 7.69 1.5 0 2.933-.294 4.242-.827l-2.477-2.477A5.25 5.25 0 0 1 6.75 12Z" />
               </svg>
             {/if}
-            unlisted
+            {$tx.models.unlisted}
           </button>
         </div>
         <button class="btn text-base flex items-center gap-2" onclick={handleUnloadAllModels} disabled={isUnloading}>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
             <path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25Zm.53 5.47a.75.75 0 0 0-1.06 0l-3 3a.75.75 0 1 0 1.06 1.06l1.72-1.72v5.69a.75.75 0 0 0 1.5 0v-5.69l1.72 1.72a.75.75 0 1 0 1.06-1.06l-3-3Z" clip-rule="evenodd" />
           </svg>
-          {isUnloading ? "Unloading..." : "Unload All"}
+          {isUnloading ? $tx.common.unloading : $tx.common.unloadAll}
         </button>
       </div>
     {/if}
@@ -150,9 +153,9 @@
     <table class="w-full">
       <thead class="sticky top-0 bg-card z-10">
         <tr class="text-left border-b border-gray-200 dark:border-white/10 bg-surface">
-          <th>{$showIdorNameStore === "id" ? "Model ID" : "Name"}</th>
-          <th></th>
-          <th>State</th>
+          <th>{$showIdorNameStore === "id" ? $tx.models.modelId : $tx.models.name}</th>
+          <th>{$tx.models.actions}</th>
+          <th>{$tx.models.state}</th>
         </tr>
       </thead>
       <tbody>
@@ -166,18 +169,21 @@
                 <p class={model.unlisted ? "text-opacity-70" : ""}><em>{model.description}</em></p>
               {/if}
               {#if model.aliases && model.aliases.length > 0}
-                <p class="text-xs text-txtsecondary">Aliases: {model.aliases.join(", ")}</p>
+                <p class="text-xs text-txtsecondary">{$tx.models.aliases}: {model.aliases.join(", ")}</p>
               {/if}
             </td>
             <td class="w-12">
-              {#if model.state === "stopped"}
-                <button class="btn btn--sm" onclick={() => loadModel(model.id)}>Load</button>
-              {:else}
-                <button class="btn btn--sm" onclick={() => unloadSingleModel(model.id)} disabled={model.state !== "ready"}>Unload</button>
-              {/if}
+              <div class="flex gap-1">
+                {#if model.state === "stopped"}
+                  <button class="btn btn--sm" onclick={() => loadModel(model.id)}>{$tx.common.load}</button>
+                {:else}
+                  <button class="btn btn--sm" onclick={() => unloadSingleModel(model.id)} disabled={model.state !== "ready"}>{$tx.common.unload}</button>
+                {/if}
+                <button class="btn btn--sm" onclick={() => (editingModelId = model.id)} title={$tx.models.editConfig}>{$tx.common.edit}</button>
+              </div>
             </td>
             <td class="w-20">
-              <span class="w-16 text-center status status--{model.state}">{model.state}</span>
+              <span class="w-16 text-center status status--{model.state}">{$tx.common[model.state] ?? model.state}</span>
             </td>
           </tr>
         {/each}
@@ -185,7 +191,7 @@
     </table>
 
     {#if Object.keys(filteredModels.peerModelsByPeerId).length > 0}
-      <h3 class="mt-8 mb-2">Peer Models</h3>
+      <h3 class="mt-8 mb-2">{$tx.models.peerModels}</h3>
       {#each Object.entries(filteredModels.peerModelsByPeerId).sort(([a], [b]) => a.localeCompare(b)) as [peerId, peerModels] (peerId)}
         <div class="mb-4">
           <table class="w-full">
@@ -209,3 +215,5 @@
     {/if}
   </div>
 </div>
+
+<ModelConfigDrawer modelId={editingModelId} onClose={() => (editingModelId = null)} />

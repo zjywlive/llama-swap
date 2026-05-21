@@ -4,6 +4,7 @@
   import { persistentStore } from "../stores/persistent";
   import LogPanel from "../components/LogPanel.svelte";
   import ResizablePanels from "../components/ResizablePanels.svelte";
+  import { tx } from "../stores/i18n";
 
   type ViewMode = "proxy" | "upstream" | "panels";
 
@@ -22,7 +23,7 @@
       class:bg-primary={$viewModeStore === "panels"}
       class:text-btn-primary-text={$viewModeStore === "panels"}
     >
-      Both
+      {$tx.logs.both}
     </button>
     <button
       onclick={() => viewModeStore.set("proxy")}
@@ -30,7 +31,7 @@
       class:bg-primary={$viewModeStore === "proxy"}
       class:text-btn-primary-text={$viewModeStore === "proxy"}
     >
-      Proxy
+      {$tx.logs.proxy}
     </button>
     <button
       onclick={() => viewModeStore.set("upstream")}
@@ -38,7 +39,7 @@
       class:bg-primary={$viewModeStore === "upstream"}
       class:text-btn-primary-text={$viewModeStore === "upstream"}
     >
-      Upstream
+      {$tx.logs.upstream}
     </button>
   </div>
 
@@ -46,16 +47,16 @@
     {#if $viewModeStore === "panels"}
       <ResizablePanels {direction} storageKey="logviewer-panel-group">
         {#snippet leftPanel()}
-          <LogPanel id="proxy" title="Proxy Logs" logData={$proxyLogs} />
+          <LogPanel id="proxy" title={$tx.logs.proxyLogs} logData={$proxyLogs} />
         {/snippet}
         {#snippet rightPanel()}
-          <LogPanel id="upstream" title="Upstream Logs" logData={$upstreamLogs} />
+          <LogPanel id="upstream" title={$tx.logs.upstreamLogs} logData={$upstreamLogs} />
         {/snippet}
       </ResizablePanels>
     {:else if $viewModeStore === "proxy"}
-      <LogPanel id="proxy" title="Proxy Logs" logData={$proxyLogs} />
+      <LogPanel id="proxy" title={$tx.logs.proxyLogs} logData={$proxyLogs} />
     {:else}
-      <LogPanel id="upstream" title="Upstream Logs" logData={$upstreamLogs} />
+      <LogPanel id="upstream" title={$tx.logs.upstreamLogs} logData={$upstreamLogs} />
     {/if}
   </div>
 </div>

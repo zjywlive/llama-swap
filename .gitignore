@@ -1,5 +1,6 @@
 .aider*
 .env
+config.local.yaml
 build/
 dist/
 .vscode

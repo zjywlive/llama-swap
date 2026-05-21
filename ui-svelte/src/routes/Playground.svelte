@@ -5,18 +5,19 @@
   import AudioInterface from "../components/playground/AudioInterface.svelte";
   import SpeechInterface from "../components/playground/SpeechInterface.svelte";
   import RerankInterface from "../components/playground/RerankInterface.svelte";
+  import { tx } from "../stores/i18n";
 
   type Tab = "chat" | "images" | "speech" | "audio" | "rerank";
 
   const selectedTabStore = persistentStore<Tab>("playground-selected-tab", "chat");
   let mobileMenuOpen = $state(false);
 
-  const tabs: { id: Tab; label: string }[] = [
-    { id: "chat", label: "Chat" },
-    { id: "images", label: "Images" },
-    { id: "speech", label: "Speech" },
-    { id: "audio", label: "Transcription" },
-    { id: "rerank", label: "Rerank" },
+  const tabs: { id: Tab }[] = [
+    { id: "chat" },
+    { id: "images" },
+    { id: "speech" },
+    { id: "audio" },
+    { id: "rerank" },
   ];
 
   function selectTab(tab: Tab) {
@@ -25,7 +26,7 @@
   }
 
   function getTabLabel(tabId: Tab): string {
-    return tabs.find(t => t.id === tabId)?.label || "";
+    return $tx.playground.tabs[tabId] || "";
   }
 </script>
 
@@ -55,7 +56,7 @@
               class="w-full px-4 py-2 text-left hover:bg-secondary-hover transition-colors first:rounded-t last:rounded-b {$selectedTabStore === tab.id ? 'bg-primary/10 font-medium' : ''}"
               onclick={() => selectTab(tab.id)}
             >
-              {tab.label}
+              {$tx.playground.tabs[tab.id]}
             </button>
           {/each}
         </div>
@@ -71,7 +72,7 @@
             : 'bg-surface hover:bg-secondary-hover border border-gray-200 dark:border-white/10'}"
           onclick={() => selectTab(tab.id)}
         >
-          {tab.label}
+          {$tx.playground.tabs[tab.id]}
         </button>
       {/each}
     </div>

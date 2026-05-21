@@ -12,6 +12,47 @@ export interface Model {
   aliases?: string[];
 }
 
+export interface EditableTimeoutsConfig {
+  connect: number;
+  keepalive: number;
+  responseHeader: number;
+  tlsHandshake: number;
+  expectContinue: number;
+  idleConn: number;
+}
+
+export interface EditableModelFilters {
+  stripParams: string;
+  setParams: Record<string, unknown>;
+  setParamsByID: Record<string, Record<string, unknown>>;
+}
+
+export interface EditableModelConfig {
+  id: string;
+  cmd: string;
+  cmdStop: string;
+  name: string;
+  description: string;
+  env: string[];
+  proxy: string;
+  aliases: string[];
+  checkEndpoint: string;
+  ttl: number;
+  unlisted: boolean;
+  useModelName: string;
+  concurrencyLimit: number;
+  sendLoadingState?: boolean | null;
+  filters: EditableModelFilters;
+  metadata: Record<string, unknown>;
+  timeouts: EditableTimeoutsConfig;
+}
+
+export interface EditableModelsResponse {
+  configPath: string;
+  editingEnabled: boolean;
+  models: EditableModelConfig[];
+}
+
 export interface TokenMetrics {
   cache_tokens: number;
   input_tokens: number;

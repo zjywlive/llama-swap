@@ -67,8 +67,10 @@ func (ic *InflightCounter) Decrement() int {
 type ProxyManager struct {
 	sync.Mutex
 
-	config    config.Config
-	ginEngine *gin.Engine
+	config               config.Config
+	configPath           string
+	configEditingEnabled bool
+	ginEngine            *gin.Engine
 
 	// logging
 	proxyLogger    *logmon.Monitor
@@ -268,6 +270,14 @@ func New(proxyConfig config.Config) *ProxyManager {
 	}
 
 	return pm
+}
+
+func (pm *ProxyManager) SetConfigPath(path string) {
+	pm.configPath = path
+}
+
+func (pm *ProxyManager) SetConfigEditingEnabled(enabled bool) {
+	pm.configEditingEnabled = enabled
 }
 
 func (pm *ProxyManager) setupGinEngine() {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { models } from "../../stores/api";
   import { groupModels } from "../../lib/modelUtils";
+  import { tx } from "../../stores/i18n";
 
   interface Props {
     value: string;
@@ -22,7 +23,7 @@
   >
     <option value="">{placeholder}</option>
     {#if grouped.local.length > 0}
-      <optgroup label="Local">
+      <optgroup label={$tx.playground.local}>
         {#each grouped.local as model (model.id)}
           <option value={model.id}>{model.id}</option>
           {#if model.aliases}
@@ -34,7 +35,7 @@
       </optgroup>
     {/if}
     {#each Object.entries(grouped.peersByProvider).sort(([a], [b]) => a.localeCompare(b)) as [peerId, peerModels] (peerId)}
-      <optgroup label="Peer: {peerId}">
+      <optgroup label="{$tx.playground.peer}: {peerId}">
         {#each peerModels as model (model.id)}
           <option value={model.id}>{model.id}</option>
         {/each}
