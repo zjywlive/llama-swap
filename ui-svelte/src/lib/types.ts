@@ -83,6 +83,22 @@ export interface EditableModelsResponse {
   models: EditableModelConfig[];
 }
 
+export interface ScannedGGUFModel {
+  path: string;
+  name: string;
+  idSuggestion: string;
+  imported: boolean;
+  existingId: string;
+  modelInfo?: EditableModelInfo | null;
+  warnings: string[];
+}
+
+export interface ScanLocalModelsResponse {
+  dir: string;
+  models: ScannedGGUFModel[];
+  warnings: string[];
+}
+
 export interface TokenMetrics {
   cache_tokens: number;
   input_tokens: number;

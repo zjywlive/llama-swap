@@ -294,28 +294,9 @@ func (pm *ProxyManager) apiSaveEditableModel(c *gin.Context) {
 		return
 	}
 
-	stat, err := os.Stat(pm.configPath)
+	backupPath, err := pm.writeConfigBytes(rendered)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("stat config: %v", err)})
-		return
-	}
-
-	backupPath := pm.configPath + ".bak"
-	if existing, err := os.ReadFile(pm.configPath); err == nil {
-		if err := os.WriteFile(backupPath, existing, stat.Mode()); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("write backup: %v", err)})
-			return
-		}
-	}
-
-	tmpPath := pm.configPath + ".tmp"
-	if err := os.WriteFile(tmpPath, rendered, stat.Mode()); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("write temp config: %v", err)})
-		return
-	}
-	if err := os.Rename(tmpPath, pm.configPath); err != nil {
-		_ = os.Remove(tmpPath)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("replace config: %v", err)})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -324,6 +305,103 @@ func (pm *ProxyManager) apiSaveEditableModel(c *gin.Context) {
 		"backupPath":     backupPath,
 		"requiresReload": true,
 	})
+}
+
+func (pm *ProxyManager) apiCreateEditableModel(c *gin.Context) {
+	if !pm.requireConfigEditing(c) {
+		return
+	}
+
+	var model editableModelConfig
+	if err := c.ShouldBindJSON(&model); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	model.ID = strings.TrimSpace(model.ID)
+	if model.ID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model id is required"})
+		return
+	}
+	if _, found := pm.config.RealModelName(model.ID); found {
+		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("model %s already exists", model.ID)})
+		return
+	}
+
+	pm.Lock()
+	defer pm.Unlock()
+
+	if exists, err := pm.rawModelExists(model.ID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	} else if exists {
+		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("model %s already exists", model.ID)})
+		return
+	}
+
+	rendered, err := pm.renderConfigWithModel(model.ID, model)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	backupPath, err := pm.writeConfigBytes(rendered)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"msg":            "ok",
+		"backupPath":     backupPath,
+		"requiresReload": true,
+	})
+}
+
+func (pm *ProxyManager) rawModelExists(modelID string) (bool, error) {
+	source, err := os.ReadFile(pm.configPath)
+	if err != nil {
+		return false, fmt.Errorf("read config: %w", err)
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(source, &root); err != nil {
+		return false, fmt.Errorf("parse config: %w", err)
+	}
+	rootMap, err := documentMapping(&root)
+	if err != nil {
+		return false, err
+	}
+	modelsNode := mappingValue(rootMap, "models")
+	if modelsNode == nil {
+		return false, nil
+	}
+	if modelsNode.Kind != yaml.MappingNode {
+		return false, fmt.Errorf("models must be a mapping")
+	}
+	return mappingValue(modelsNode, modelID) != nil, nil
+}
+
+func (pm *ProxyManager) writeConfigBytes(rendered []byte) (string, error) {
+	stat, err := os.Stat(pm.configPath)
+	if err != nil {
+		return "", fmt.Errorf("stat config: %v", err)
+	}
+
+	backupPath := pm.configPath + ".bak"
+	if existing, err := os.ReadFile(pm.configPath); err == nil {
+		if err := os.WriteFile(backupPath, existing, stat.Mode()); err != nil {
+			return "", fmt.Errorf("write backup: %v", err)
+		}
+	}
+
+	tmpPath := pm.configPath + ".tmp"
+	if err := os.WriteFile(tmpPath, rendered, stat.Mode()); err != nil {
+		return "", fmt.Errorf("write temp config: %v", err)
+	}
+	if err := os.Rename(tmpPath, pm.configPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("replace config: %v", err)
+	}
+	return backupPath, nil
 }
 
 func (pm *ProxyManager) renderConfigWithModel(modelID string, model editableModelConfig) ([]byte, error) {

@@ -5,10 +5,12 @@
   import { tx } from "../stores/i18n";
   import type { Model } from "../lib/types";
   import ModelConfigDrawer from "./ModelConfigDrawer.svelte";
+  import ImportModelDialog from "./ImportModelDialog.svelte";
 
   let isUnloading = $state(false);
   let menuOpen = $state(false);
   let editingModelId = $state<string | null>(null);
+  let showImportDialog = $state(false);
 
   const showUnlistedStore = persistentStore<boolean>("showUnlisted", true);
   const showIdorNameStore = persistentStore<"id" | "name">("showIdorName", "id");
@@ -73,6 +75,16 @@
             <div class="absolute right-0 mt-2 w-48 bg-surface border border-gray-200 dark:border-white/10 rounded shadow-lg z-20">
               <button
                 class="w-full text-left px-4 py-2 hover:bg-secondary-hover flex items-center gap-2"
+                onclick={() => { showImportDialog = true; menuOpen = false; }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+                  <path d="M19.5 21a3 3 0 0 0 3-3v-4.5a3 3 0 0 0-3-3h-15a3 3 0 0 0-3 3V18a3 3 0 0 0 3 3h15Z" />
+                  <path d="M7.5 9.75A.75.75 0 0 1 8.25 9h3V5.56L10.03 6.78a.75.75 0 1 1-1.06-1.06l2.5-2.5a.75.75 0 0 1 1.06 0l2.5 2.5a.75.75 0 1 1-1.06 1.06L12.75 5.56V9h3a.75.75 0 0 1 0 1.5h-7.5a.75.75 0 0 1-.75-.75Z" />
+                </svg>
+                {$tx.models.importModel}
+              </button>
+              <button
+                class="w-full text-left px-4 py-2 hover:bg-secondary-hover flex items-center gap-2"
                 onclick={() => { toggleIdorName(); menuOpen = false; }}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
@@ -116,6 +128,14 @@
     {#if !$isNarrow}
       <div class="flex justify-between">
         <div class="flex gap-2">
+          <button class="btn text-base flex items-center gap-2" onclick={() => (showImportDialog = true)} style="line-height: 1.2">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+              <path d="M19.5 21a3 3 0 0 0 3-3v-4.5a3 3 0 0 0-3-3h-15a3 3 0 0 0-3 3V18a3 3 0 0 0 3 3h15Z" />
+              <path d="M7.5 9.75A.75.75 0 0 1 8.25 9h3V5.56L10.03 6.78a.75.75 0 1 1-1.06-1.06l2.5-2.5a.75.75 0 0 1 1.06 0l2.5 2.5a.75.75 0 1 1-1.06 1.06L12.75 5.56V9h3a.75.75 0 0 1 0 1.5h-7.5a.75.75 0 0 1-.75-.75Z" />
+            </svg>
+            {$tx.models.importModel}
+          </button>
+
           <button class="btn text-base flex items-center gap-2" onclick={toggleIdorName} style="line-height: 1.2">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
               <path fill-rule="evenodd" d="M15.97 2.47a.75.75 0 0 1 1.06 0l4.5 4.5a.75.75 0 0 1 0 1.06l-4.5 4.5a.75.75 0 1 1-1.06-1.06l3.22-3.22H7.5a.75.75 0 0 1 0-1.5h11.69l-3.22-3.22a.75.75 0 0 1 0-1.06Zm-7.94 9a.75.75 0 0 1 0 1.06l-3.22 3.22H16.5a.75.75 0 0 1 0 1.5H4.81l3.22 3.22a.75.75 0 1 1-1.06 1.06l-4.5-4.5a.75.75 0 0 1 0-1.06l4.5-4.5a.75.75 0 0 1 1.06 0Z" clip-rule="evenodd" />
@@ -217,3 +237,4 @@
 </div>
 
 <ModelConfigDrawer modelId={editingModelId} onClose={() => (editingModelId = null)} />
+<ImportModelDialog open={showImportDialog} onClose={() => (showImportDialog = false)} />

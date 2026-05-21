@@ -11,6 +11,7 @@ import type {
   EditableModelConfig,
   EditableModelInfo,
   EditableModelsResponse,
+  ScanLocalModelsResponse,
 } from "../lib/types";
 import { connectionState } from "./theme";
 
@@ -241,11 +242,34 @@ export async function saveEditableModel(model: EditableModelConfig): Promise<voi
   }
 }
 
+export async function createEditableModel(model: EditableModelConfig): Promise<void> {
+  const response = await fetch("/api/config/models", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(model),
+  });
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+}
+
 export async function inspectEditableModelPath(path: string): Promise<EditableModelInfo> {
   const response = await fetch("/api/config/inspect-model", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path }),
+  });
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+  return await response.json();
+}
+
+export async function scanLocalModels(dir: string, recursive: boolean): Promise<ScanLocalModelsResponse> {
+  const response = await fetch("/api/config/scan-models", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dir, recursive }),
   });
   if (!response.ok) {
     throw new Error(await readError(response));
