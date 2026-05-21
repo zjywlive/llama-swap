@@ -1,6 +1,9 @@
 # Define variables for the application
 APP_NAME = llama-swap
 BUILD_DIR = build
+DEV_DIR = $(CURDIR)/.dev
+GO_ENV = GOPATH=$(DEV_DIR)/go GOMODCACHE=$(DEV_DIR)/go/pkg/mod GOCACHE=$(DEV_DIR)/go-build
+GO = $(GO_ENV) go
 
 # Get the current Git hash
 GIT_HASH := $(shell git rev-parse --short HEAD)
@@ -25,15 +28,15 @@ proxy/ui_dist/placeholder.txt:
 
 # use cached test results while developing
 test-dev: proxy/ui_dist/placeholder.txt
-	go test -short ./proxy/... ./internal/...
-	staticcheck ./proxy/... ./internal/... || true
+	$(GO) test -short ./proxy/... ./internal/...
+	$(GO_ENV) staticcheck ./proxy/... ./internal/... || true
 
 test: proxy/ui_dist/placeholder.txt
-	go test -short -count=1 ./proxy/... ./internal/...
+	$(GO) test -short -count=1 ./proxy/... ./internal/...
 
 # for CI - full test (takes longer)
 test-all: proxy/ui_dist/placeholder.txt
-	go test -race -count=1 ./proxy/... ./internal/...
+	$(GO) test -race -count=1 ./proxy/... ./internal/...
 
 ui/node_modules:
 	cd ui-svelte && npm install
@@ -45,33 +48,33 @@ ui: ui/node_modules
 # Build OSX binary
 mac: ui
 	@echo "Building Mac binary..."
-	GOOS=darwin GOARCH=arm64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
+	GOOS=darwin GOARCH=arm64 $(GO) build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
 
 # Build Linux binary
 linux: linux-arm64 linux-amd64
 
 linux-amd64: ui
 	@echo "Building Linux AMD64 binary..."
-	GOOS=linux GOARCH=amd64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
+	GOOS=linux GOARCH=amd64 $(GO) build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
 
 linux-arm64: ui
 	@echo "Building Linux ARM64 binary..."
-	GOOS=linux GOARCH=arm64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-arm64
+	GOOS=linux GOARCH=arm64 $(GO) build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-arm64
 
 # Build Windows binary
 windows: ui
 	@echo "Building Windows binary..."
-	GOOS=windows GOARCH=amd64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
+	GOOS=windows GOARCH=amd64 $(GO) build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
 
 # for testing proxy.Process
 simple-responder:
 	@echo "Building simple responder"
-	GOOS=darwin GOARCH=arm64 go build -o $(BUILD_DIR)/simple-responder_darwin_arm64 cmd/simple-responder/simple-responder.go
-	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/simple-responder_linux_amd64 cmd/simple-responder/simple-responder.go
+	GOOS=darwin GOARCH=arm64 $(GO) build -o $(BUILD_DIR)/simple-responder_darwin_arm64 cmd/simple-responder/simple-responder.go
+	GOOS=linux GOARCH=amd64 $(GO) build -o $(BUILD_DIR)/simple-responder_linux_amd64 cmd/simple-responder/simple-responder.go
 
 simple-responder-windows:
 	@echo "Building simple responder for windows"
-	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/simple-responder.exe cmd/simple-responder/simple-responder.go
+	GOOS=windows GOARCH=amd64 $(GO) build -o $(BUILD_DIR)/simple-responder.exe cmd/simple-responder/simple-responder.go
 
 # Ensure build directory exists
 $(BUILD_DIR):
@@ -91,11 +94,11 @@ release:
 	echo "tagging new version: $$new_tag"; \
 	git tag "$$new_tag";
 
-GOOS ?= $(shell go env GOOS 2>/dev/null || echo linux)
-GOARCH ?= $(shell go env GOARCH 2>/dev/null || echo amd64)
+GOOS ?= $(shell $(GO_ENV) go env GOOS 2>/dev/null || echo linux)
+GOARCH ?= $(shell $(GO_ENV) go env GOARCH 2>/dev/null || echo amd64)
 wol-proxy: $(BUILD_DIR)
 	@echo "Building wol-proxy"
-	go build -o $(BUILD_DIR)/wol-proxy-$(GOOS)-$(GOARCH)-$(shell date +%Y-%m-%d) cmd/wol-proxy/wol-proxy.go
+	$(GO) build -o $(BUILD_DIR)/wol-proxy-$(GOOS)-$(GOARCH)-$(shell date +%Y-%m-%d) cmd/wol-proxy/wol-proxy.go
 
 test-ui:
 	cd ui-svelte && npm ci && npm run check && npm test
