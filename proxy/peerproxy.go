@@ -55,15 +55,12 @@ func NewPeerProxy(peers config.PeerDictionaryConfig, proxyLogger *logmon.Monitor
 		}
 
 		// Create reverse proxy for this peer
-		reverseProxy := httputil.NewSingleHostReverseProxy(peer.ProxyURL)
-		reverseProxy.Transport = peerTransport
-
-		// Wrap Director to set Host header for remote hosts (not localhost)
-		originalDirector := reverseProxy.Director
-		reverseProxy.Director = func(req *http.Request) {
-			originalDirector(req)
-			// Ensure Host header matches target URL for remote proxying
-			req.Host = req.URL.Host
+		reverseProxy := &httputil.ReverseProxy{
+			Transport: peerTransport,
+			Rewrite: func(req *httputil.ProxyRequest) {
+				req.SetURL(peer.ProxyURL)
+				req.SetXForwarded()
+			},
 		}
 
 		reverseProxy.ModifyResponse = func(resp *http.Response) error {

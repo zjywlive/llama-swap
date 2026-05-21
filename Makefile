@@ -4,6 +4,8 @@ BUILD_DIR = build
 DEV_DIR = $(CURDIR)/.dev
 GO_ENV = GOPATH=$(DEV_DIR)/go GOMODCACHE=$(DEV_DIR)/go/pkg/mod GOCACHE=$(DEV_DIR)/go-build
 GO = $(GO_ENV) go
+STATICCHECK_VERSION ?= v0.7.0
+STATICCHECK = $(DEV_DIR)/go/bin/staticcheck
 
 # Get the current Git hash
 GIT_HASH := $(shell git rev-parse --short HEAD)
@@ -26,10 +28,16 @@ proxy/ui_dist/placeholder.txt:
 	mkdir -p proxy/ui_dist
 	touch $@
 
+$(STATICCHECK):
+	mkdir -p $(DEV_DIR)/go/bin
+	$(GO_ENV) GOBIN=$(DEV_DIR)/go/bin go install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
+
+tools: $(STATICCHECK)
+
 # use cached test results while developing
-test-dev: proxy/ui_dist/placeholder.txt
+test-dev: proxy/ui_dist/placeholder.txt $(STATICCHECK)
 	$(GO) test -short ./proxy/... ./internal/...
-	$(GO_ENV) staticcheck ./proxy/... ./internal/... || true
+	$(GO_ENV) $(STATICCHECK) ./proxy/... ./internal/...
 
 test: proxy/ui_dist/placeholder.txt
 	$(GO) test -short -count=1 ./proxy/... ./internal/...
@@ -104,5 +112,5 @@ test-ui:
 	cd ui-svelte && npm ci && npm run check && npm test
 
 # Phony targets
-.PHONY: all clean ui mac windows simple-responder simple-responder-windows test test-all test-dev test-ui wol-proxy
+.PHONY: all clean ui mac windows simple-responder simple-responder-windows test test-all test-dev test-ui tools wol-proxy
 .PHONE: linux linux-arm64 linux-amd64

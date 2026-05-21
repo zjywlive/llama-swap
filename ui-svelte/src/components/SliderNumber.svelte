@@ -21,26 +21,87 @@
     allowEmpty = true,
   }: Props = $props();
 
-  let sliderValue = $derived(value === "" ? min : clamp(Number(value)));
+  let editing = $state(false);
+  let inputText = $state("");
+  let precision = $derived(Math.min(12, Math.max(decimalPlaces(step), decimalPlaces(min))));
+  let sliderValue = $derived(value === "" ? min : normalize(Number(value)));
 
   $effect(() => {
     if (value !== "") {
-      const next = clamp(Number(value));
+      const next = normalize(Number(value));
       if (next !== value) value = next;
     }
+    if (!editing) {
+      inputText = value === "" ? "" : formatValue(value);
+    }
   });
+
+  function decimalPlaces(next: number): number {
+    const text = String(next);
+    if (text.includes("e-")) return Number(text.split("e-")[1]) || 0;
+    const dot = text.indexOf(".");
+    return dot === -1 ? 0 : text.length - dot - 1;
+  }
 
   function clamp(next: number): number {
     if (!Number.isFinite(next)) return min;
     return Math.min(max, Math.max(min, next));
   }
 
-  function setNumber(raw: string): void {
-    if (allowEmpty && raw.trim() === "") {
-      value = "";
+  function normalize(next: number): number {
+    const bounded = clamp(next);
+    if (!Number.isFinite(step) || step <= 0) return bounded;
+    const snapped = min + Math.round((bounded - min) / step) * step;
+    const factor = 10 ** precision;
+    return clamp(Math.round(snapped * factor) / factor);
+  }
+
+  function formatValue(next: number | ""): string {
+    return next === "" ? "" : String(next);
+  }
+
+  function resetInput(): void {
+    editing = false;
+    inputText = value === "" ? "" : formatValue(value);
+  }
+
+  function commitInput(): void {
+    const raw = inputText.trim();
+    editing = false;
+
+    if (raw === "") {
+      if (allowEmpty) {
+        value = "";
+        inputText = "";
+      } else {
+        resetInput();
+      }
       return;
     }
-    value = clamp(Number(raw));
+
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) {
+      resetInput();
+      return;
+    }
+
+    value = normalize(parsed);
+    inputText = formatValue(value);
+  }
+
+  function handleNumberKeydown(event: KeyboardEvent): void {
+    if (event.key === "Enter") {
+      commitInput();
+      (event.currentTarget as HTMLInputElement).blur();
+    } else if (event.key === "Escape") {
+      resetInput();
+      (event.currentTarget as HTMLInputElement).blur();
+    }
+  }
+
+  function setSlider(raw: string): void {
+    editing = false;
+    value = normalize(Number(raw));
   }
 </script>
 
@@ -54,8 +115,14 @@
       {max}
       {step}
       {disabled}
-      value={value}
-      oninput={(event) => setNumber((event.currentTarget as HTMLInputElement).value)}
+      value={inputText}
+      onfocus={() => (editing = true)}
+      oninput={(event) => {
+        editing = true;
+        inputText = (event.currentTarget as HTMLInputElement).value;
+      }}
+      onblur={commitInput}
+      onkeydown={handleNumberKeydown}
     />
   </div>
   <input
@@ -66,7 +133,7 @@
     {step}
     {disabled}
     value={sliderValue}
-    oninput={(event) => (value = clamp(Number((event.currentTarget as HTMLInputElement).value)))}
+    oninput={(event) => setSlider((event.currentTarget as HTMLInputElement).value)}
   />
   {#if help}
     <span class="mt-1 block text-xs text-txtsecondary">{help}</span>

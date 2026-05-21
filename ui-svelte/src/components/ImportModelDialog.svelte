@@ -2,7 +2,16 @@
   import { createEditableModel, fetchEditableModels, scanLocalModels } from "../stores/api";
   import { tx } from "../stores/i18n";
   import type { EditableModelConfig, ScannedLocalModel } from "../lib/types";
-  import { buildLlamaServerCommand, buildMLXServerCommand, defaultMLXRuntime, defaultRuntime, parseRuntimeCommand } from "../lib/modelConfig";
+  import {
+    buildLlamaServerCommand,
+    buildMLXServerCommand,
+    createLlamaStudioRuntimeDefaults,
+    defaultMLXRuntime,
+    estimateLlamaMemoryUsage,
+    estimateMLXMemoryUsage,
+    formatMemorySize,
+    parseRuntimeCommand,
+  } from "../lib/modelConfig";
 
   interface Props {
     open: boolean;
@@ -47,11 +56,6 @@
 
   function numberLabel(value: number | undefined): string {
     return value && value > 0 ? value.toLocaleString() : $tx.common.unknown;
-  }
-
-  function limitedDefault(preferred: number, max: number | undefined, min = 1): number {
-    const limit = max && max > 0 ? max : preferred;
-    return Math.max(min, Math.min(preferred, limit));
   }
 
   async function inferDefaultDirectory(): Promise<void> {
@@ -103,26 +107,7 @@
   }
 
   function buildLlamaImportedCommand(scanned: ScannedLocalModel): string {
-    const info = scanned.modelInfo;
-    const limits = info?.limits;
-    const hardwareThreads = typeof navigator !== "undefined" && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4;
-    const ctxSize = limitedDefault(4096, limits?.contextMax || info?.contextLength, 512);
-    const batchSize = limitedDefault(512, Math.min(limits?.batchMax || ctxSize, ctxSize), 32);
-    const microBatchSize = limitedDefault(256, Math.min(limits?.microBatchMax || batchSize, batchSize), 32);
-    const threads = limitedDefault(4, Math.min(limits?.threadsMax || hardwareThreads, hardwareThreads), 1);
-    const runtime = defaultRuntime();
-
-    runtime.modelPath = scanned.path;
-    runtime.ctxSize = ctxSize;
-    runtime.threads = threads;
-    runtime.threadsBatch = threads;
-    runtime.batchSize = batchSize;
-    runtime.ubatchSize = microBatchSize;
-    runtime.parallel = 1;
-    runtime.priority = -1;
-    runtime.gpuLayers = 0;
-    runtime.noWarmup = true;
-    runtime.extraArgs = `--alias ${scanned.idSuggestion}`;
+    const runtime = createLlamaStudioRuntimeDefaults(scanned.path, scanned.modelInfo, scanned.idSuggestion);
     return buildLlamaServerCommand(runtime);
   }
 
@@ -133,6 +118,15 @@
     runtime.maxTokens = Math.min(512, info?.contextLength || 512);
     runtime.prefillStepSize = Math.min(2048, info?.contextLength || 2048);
     return buildMLXServerCommand(runtime);
+  }
+
+  function memoryLabel(scanned: ScannedLocalModel): string {
+    if (!scanned.modelInfo) return $tx.common.unknown;
+    const estimate = scanned.backend === "mlx-lm"
+      ? estimateMLXMemoryUsage(scanned.modelInfo)
+      : estimateLlamaMemoryUsage(scanned.modelInfo, createLlamaStudioRuntimeDefaults(scanned.path, scanned.modelInfo, scanned.idSuggestion));
+    if (!estimate) return $tx.common.unknown;
+    return `${formatMemorySize(estimate.gpuBytes)} / ${formatMemorySize(estimate.totalBytes)}`;
   }
 
   function buildImportedConfig(scanned: ScannedLocalModel): EditableModelConfig {
@@ -255,6 +249,7 @@
                 <th>{$tx.importer.modelId}</th>
                 <th>{$tx.importer.context}</th>
                 <th>{$tx.importer.layers}</th>
+                <th>{$tx.importer.memory}</th>
                 <th>{$tx.models.actions}</th>
               </tr>
             </thead>
@@ -282,6 +277,7 @@
                   <td class="break-all font-mono text-xs">{model.idSuggestion}</td>
                   <td>{numberLabel(model.modelInfo?.contextLength)}</td>
                   <td>{numberLabel(model.modelInfo?.blockCount)}</td>
+                  <td class="whitespace-nowrap text-xs">{memoryLabel(model)}</td>
                   <td class="whitespace-nowrap">
                     {#if model.imported}
                       <span class="status status--ready">{model.existingId ? `${$tx.importer.alreadyImported}: ${model.existingId}` : $tx.importer.imported}</span>

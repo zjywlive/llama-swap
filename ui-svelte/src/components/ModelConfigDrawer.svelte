@@ -5,8 +5,12 @@
   import {
     buildLlamaServerCommand,
     buildMLXServerCommand,
+    createLlamaStudioRuntimeDefaults,
     defaultMLXRuntime,
     defaultRuntime,
+    estimateLlamaMemoryUsage,
+    estimateMLXMemoryUsage,
+    formatMemorySize,
     parseRuntimeCommand,
     type LlamaServerRuntime,
     type MLXServerRuntime,
@@ -41,6 +45,7 @@
   let message = $state<string | null>(null);
 
   let commandPreview = $derived(runtimeKind === "llama-server" ? buildLlamaServerCommand(runtime) : runtimeKind === "mlx-lm" ? buildMLXServerCommand(mlxRuntime) : rawCommand);
+  let memoryEstimate = $derived(runtimeKind === "llama-server" ? estimateLlamaMemoryUsage(modelInfo, runtime) : runtimeKind === "mlx-lm" ? estimateMLXMemoryUsage(modelInfo) : null);
   let contextMax = $derived(modelInfo?.limits?.contextMax || 131072);
   let gpuLayerMax = $derived(modelInfo?.limits?.gpuLayerMax || 128);
   let batchMax = $derived(modelInfo?.limits?.batchMax || Math.min(contextMax, 8192));
@@ -145,6 +150,7 @@
         exists: false,
         backend: "",
         format: "",
+        fileSize: 0,
         version: 0,
         name: "",
         architecture: "",
@@ -169,14 +175,23 @@
     return value > 0 ? value.toLocaleString() : $tx.editor.modelInfo.unknown;
   }
 
-  function maxHelp(label: string, max: number): string {
-    return `${label}: <= ${max.toLocaleString()}. ${$tx.editor.help.runtimeLimited}`;
+  function limitHelp(text: string, max: number): string {
+    return `${text} ${$tx.editor.tuning.max}: ${max.toLocaleString()}.`;
   }
 
   function runtimeHelp(): string {
     if (runtimeKind === "llama-server") return $tx.editor.help.runtimeAuto;
     if (runtimeKind === "mlx-lm") return $tx.editor.help.runtimeMLX;
     return $tx.editor.help.runtimeRaw;
+  }
+
+  function applyLlamaDefaults(): void {
+    const next = createLlamaStudioRuntimeDefaults(runtime.modelPath, modelInfo);
+    next.executable = runtime.executable;
+    next.host = runtime.host;
+    next.port = runtime.port;
+    next.extraArgs = runtime.extraArgs;
+    runtime = next;
   }
 
   async function validate(): Promise<void> {
@@ -274,9 +289,36 @@
             </label>
           </div>
         {:else if activeTab === "runtime"}
-          <div class="mb-4 rounded border border-border bg-card p-3 text-sm text-txtsecondary">
-            {runtimeHelp()}
+          <div class="mb-4 flex flex-wrap items-start gap-3">
+            <div class="min-w-0 flex-1 rounded border border-border bg-card p-3 text-sm text-txtsecondary">
+              {runtimeHelp()}
+            </div>
+            {#if runtimeKind === "llama-server"}
+              <button class="btn btn--sm" onclick={applyLlamaDefaults}>{$tx.editor.actions.applyDefaults}</button>
+            {/if}
           </div>
+
+          {#if memoryEstimate}
+            <div class="mb-4 rounded border border-border bg-card p-3 text-sm">
+              <div class="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                <h3 class="p-0 text-base">{$tx.editor.memory.title}</h3>
+                <span class="text-xs text-txtsecondary">{memoryEstimate.confidence === "low" ? $tx.editor.memory.lowConfidence : $tx.editor.memory.estimated}</span>
+              </div>
+              <div class="grid gap-2 sm:grid-cols-2">
+                <div class="rounded border border-border bg-background p-3">
+                  <div class="text-xs uppercase text-txtsecondary">{$tx.editor.memory.gpu}</div>
+                  <div class="mt-1 text-xl font-semibold">{formatMemorySize(memoryEstimate.gpuBytes)}</div>
+                </div>
+                <div class="rounded border border-border bg-background p-3">
+                  <div class="text-xs uppercase text-txtsecondary">{$tx.editor.memory.total}</div>
+                  <div class="mt-1 text-xl font-semibold">{formatMemorySize(memoryEstimate.totalBytes)}</div>
+                </div>
+              </div>
+              <p class="mt-2 text-xs text-txtsecondary">
+                {$tx.editor.memory.breakdown}: {$tx.editor.memory.model} {formatMemorySize(memoryEstimate.modelBytes)} · KV {formatMemorySize(memoryEstimate.kvBytes)}
+              </p>
+            </div>
+          {/if}
 
           {#if runtimeKind !== "raw"}
             <div class="mb-4 rounded border border-border bg-card p-3 text-sm">
@@ -328,18 +370,19 @@
                 <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.port}</span>
                 <input class="w-full rounded border border-border bg-card px-3 py-2" bind:value={runtime.port} />
               </label>
-              <SliderNumber label={$tx.editor.fields.ctxSize} bind:value={runtime.ctxSize} min={512} max={contextMax} step={512} help={maxHelp($tx.editor.fields.ctxSize, contextMax)} />
-              <SliderNumber label={$tx.editor.fields.threads} bind:value={runtime.threads} min={1} max={threadsMax} step={1} help={maxHelp($tx.editor.fields.threads, threadsMax)} />
-              <SliderNumber label={$tx.editor.fields.threadsBatch} bind:value={runtime.threadsBatch} min={1} max={threadsMax} step={1} help={maxHelp($tx.editor.fields.threadsBatch, threadsMax)} />
-              <SliderNumber label={$tx.editor.fields.batchSize} bind:value={runtime.batchSize} min={32} max={batchMax} step={32} help={maxHelp($tx.editor.fields.batchSize, batchMax)} />
-              <SliderNumber label={$tx.editor.fields.ubatchSize} bind:value={runtime.ubatchSize} min={32} max={microBatchMax} step={32} help={maxHelp($tx.editor.fields.ubatchSize, microBatchMax)} />
-              <SliderNumber label={$tx.editor.fields.parallel} bind:value={runtime.parallel} min={1} max={parallelMax} step={1} help={maxHelp($tx.editor.fields.parallel, parallelMax)} />
-              <SliderNumber label={$tx.editor.fields.priority} bind:value={runtime.priority} min={-3} max={3} step={1} help="-3..3" />
+              <SliderNumber label={$tx.editor.fields.ctxSize} bind:value={runtime.ctxSize} min={512} max={contextMax} step={512} help={limitHelp($tx.editor.tuning.ctxSize, contextMax)} />
+              <SliderNumber label={$tx.editor.fields.threads} bind:value={runtime.threads} min={1} max={threadsMax} step={1} help={limitHelp($tx.editor.tuning.threads, threadsMax)} />
+              <SliderNumber label={$tx.editor.fields.threadsBatch} bind:value={runtime.threadsBatch} min={1} max={threadsMax} step={1} help={limitHelp($tx.editor.tuning.threadsBatch, threadsMax)} />
+              <SliderNumber label={$tx.editor.fields.batchSize} bind:value={runtime.batchSize} min={32} max={batchMax} step={32} help={limitHelp($tx.editor.tuning.batchSize, batchMax)} />
+              <SliderNumber label={$tx.editor.fields.ubatchSize} bind:value={runtime.ubatchSize} min={32} max={microBatchMax} step={32} help={limitHelp($tx.editor.tuning.ubatchSize, microBatchMax)} />
+              <SliderNumber label={$tx.editor.fields.parallel} bind:value={runtime.parallel} min={1} max={parallelMax} step={1} help={limitHelp($tx.editor.tuning.parallel, parallelMax)} />
+              <SliderNumber label={$tx.editor.fields.priority} bind:value={runtime.priority} min={-3} max={3} step={1} help={$tx.editor.tuning.priority} />
               <label class="block">
                 <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.device}</span>
                 <input class="w-full rounded border border-border bg-card px-3 py-2" placeholder="none / auto / Metal" bind:value={runtime.device} />
+                <span class="mt-1 block text-xs text-txtsecondary">{$tx.editor.tuning.device}</span>
               </label>
-              <SliderNumber label={$tx.editor.fields.gpuLayers} bind:value={runtime.gpuLayers} min={0} max={gpuLayerMax} step={1} help={maxHelp($tx.editor.fields.gpuLayers, gpuLayerMax)} />
+              <SliderNumber label={$tx.editor.fields.gpuLayers} bind:value={runtime.gpuLayers} min={0} max={gpuLayerMax} step={1} help={limitHelp($tx.editor.tuning.gpuLayers, gpuLayerMax)} />
               <label class="block">
                 <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.flashAttn}</span>
                 <select class="w-full rounded border border-border bg-card px-3 py-2" bind:value={runtime.flashAttention}>
@@ -348,14 +391,17 @@
                   <option value="on">on</option>
                   <option value="off">off</option>
                 </select>
+                <span class="mt-1 block text-xs text-txtsecondary">{$tx.editor.tuning.flashAttn}</span>
               </label>
               <label class="block">
                 <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.cacheTypeK}</span>
                 <input class="w-full rounded border border-border bg-card px-3 py-2" bind:value={runtime.cacheTypeK} />
+                <span class="mt-1 block text-xs text-txtsecondary">{$tx.editor.tuning.cacheTypeK}</span>
               </label>
               <label class="block">
                 <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.cacheTypeV}</span>
                 <input class="w-full rounded border border-border bg-card px-3 py-2" bind:value={runtime.cacheTypeV} />
+                <span class="mt-1 block text-xs text-txtsecondary">{$tx.editor.tuning.cacheTypeV}</span>
               </label>
               <label class="mt-7 flex items-center gap-2">
                 <input type="checkbox" bind:checked={runtime.noWarmup} />
@@ -388,19 +434,20 @@
                 <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.port}</span>
                 <input class="w-full rounded border border-border bg-card px-3 py-2" bind:value={mlxRuntime.port} />
               </label>
-              <SliderNumber label={$tx.editor.fields.maxTokens} bind:value={mlxRuntime.maxTokens} min={1} max={Math.max(contextMax || 8192, 8192)} step={128} help={`${$tx.editor.fields.maxTokens}: <= ${Math.max(contextMax || 8192, 8192).toLocaleString()}`} />
-              <SliderNumber label={$tx.editor.fields.temp} bind:value={mlxRuntime.temp} min={0} max={2} step={0.05} allowEmpty={false} />
-              <SliderNumber label={$tx.editor.fields.topP} bind:value={mlxRuntime.topP} min={0} max={1} step={0.05} allowEmpty={false} />
-              <SliderNumber label={$tx.editor.fields.topK} bind:value={mlxRuntime.topK} min={0} max={200} step={1} />
-              <SliderNumber label={$tx.editor.fields.minP} bind:value={mlxRuntime.minP} min={0} max={1} step={0.01} />
-              <SliderNumber label={$tx.editor.fields.numDraftTokens} bind:value={mlxRuntime.numDraftTokens} min={1} max={16} step={1} />
-              <SliderNumber label={$tx.editor.fields.decodeConcurrency} bind:value={mlxRuntime.decodeConcurrency} min={1} max={64} step={1} />
-              <SliderNumber label={$tx.editor.fields.promptConcurrency} bind:value={mlxRuntime.promptConcurrency} min={1} max={32} step={1} />
-              <SliderNumber label={$tx.editor.fields.prefillStepSize} bind:value={mlxRuntime.prefillStepSize} min={128} max={Math.max(contextMax || 8192, 8192)} step={128} />
-              <SliderNumber label={$tx.editor.fields.promptCacheSize} bind:value={mlxRuntime.promptCacheSize} min={0} max={64} step={1} />
+              <SliderNumber label={$tx.editor.fields.maxTokens} bind:value={mlxRuntime.maxTokens} min={1} max={Math.max(contextMax || 8192, 8192)} step={128} help={limitHelp($tx.editor.tuning.maxTokens, Math.max(contextMax || 8192, 8192))} />
+              <SliderNumber label={$tx.editor.fields.temp} bind:value={mlxRuntime.temp} min={0} max={2} step={0.05} help={$tx.editor.tuning.temp} allowEmpty={false} />
+              <SliderNumber label={$tx.editor.fields.topP} bind:value={mlxRuntime.topP} min={0} max={1} step={0.05} help={$tx.editor.tuning.topP} allowEmpty={false} />
+              <SliderNumber label={$tx.editor.fields.topK} bind:value={mlxRuntime.topK} min={0} max={200} step={1} help={$tx.editor.tuning.topK} />
+              <SliderNumber label={$tx.editor.fields.minP} bind:value={mlxRuntime.minP} min={0} max={1} step={0.01} help={$tx.editor.tuning.minP} />
+              <SliderNumber label={$tx.editor.fields.numDraftTokens} bind:value={mlxRuntime.numDraftTokens} min={1} max={16} step={1} help={$tx.editor.tuning.numDraftTokens} />
+              <SliderNumber label={$tx.editor.fields.decodeConcurrency} bind:value={mlxRuntime.decodeConcurrency} min={1} max={64} step={1} help={$tx.editor.tuning.decodeConcurrency} />
+              <SliderNumber label={$tx.editor.fields.promptConcurrency} bind:value={mlxRuntime.promptConcurrency} min={1} max={32} step={1} help={$tx.editor.tuning.promptConcurrency} />
+              <SliderNumber label={$tx.editor.fields.prefillStepSize} bind:value={mlxRuntime.prefillStepSize} min={128} max={Math.max(contextMax || 8192, 8192)} step={128} help={limitHelp($tx.editor.tuning.prefillStepSize, Math.max(contextMax || 8192, 8192))} />
+              <SliderNumber label={$tx.editor.fields.promptCacheSize} bind:value={mlxRuntime.promptCacheSize} min={0} max={64} step={1} help={$tx.editor.tuning.promptCacheSize} />
               <label class="block">
                 <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.promptCacheBytes}</span>
                 <input class="w-full rounded border border-border bg-card px-3 py-2" placeholder="4G" bind:value={mlxRuntime.promptCacheBytes} />
+                <span class="mt-1 block text-xs text-txtsecondary">{$tx.editor.tuning.promptCacheBytes}</span>
               </label>
               <label class="block">
                 <span class="mb-1 block text-sm font-medium">{$tx.editor.fields.logLevel}</span>

@@ -41,6 +41,7 @@ export interface EditableModelInfo {
   exists: boolean;
   backend: "llama-server" | "mlx-lm" | "";
   format: string;
+  fileSize: number;
   version: number;
   name: string;
   architecture: string;

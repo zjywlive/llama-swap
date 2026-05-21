@@ -1,3 +1,5 @@
+import type { EditableModelInfo } from "./types";
+
 export interface LlamaServerRuntime {
   executable: string;
   modelPath: string;
@@ -51,6 +53,16 @@ export interface ParsedRuntime {
   kind: "llama-server" | "mlx-lm" | "raw";
   runtime: LlamaServerRuntime;
   mlxRuntime: MLXServerRuntime;
+}
+
+export interface RuntimeMemoryEstimate {
+  totalBytes: number;
+  gpuBytes: number;
+  modelBytes: number;
+  kvBytes: number;
+  overheadBytes: number;
+  confidence: "medium" | "low";
+  notes: string[];
 }
 
 export function defaultRuntime(): LlamaServerRuntime {
@@ -167,6 +179,126 @@ function appendValue(args: string[], flag: string, value: string | number | ""):
 
 function appendBoolean(args: string[], flag: string, value: boolean): void {
   if (value) args.push(flag);
+}
+
+function numericValue(value: string | number | "", fallback = 0): number {
+  if (value === "") return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function boundedDefault(preferred: number, max: number | undefined, min = 1): number {
+  const limit = max && max > 0 ? max : preferred;
+  return Math.max(min, Math.min(preferred, limit));
+}
+
+function modelLayerCount(info: EditableModelInfo | null | undefined): number {
+  if (!info) return 0;
+  if (info.blockCount > 0) return info.blockCount;
+  if (info.limits?.gpuLayerMax > 0) return info.limits.gpuLayerMax;
+  return 0;
+}
+
+export function createLlamaStudioRuntimeDefaults(modelPath: string, info: EditableModelInfo | null | undefined, alias = ""): LlamaServerRuntime {
+  const runtime = defaultRuntime();
+  const contextMax = info?.limits?.contextMax || info?.contextLength || 4096;
+  const ctxSize = boundedDefault(contextMax, contextMax, 512);
+  const threads = boundedDefault(16, info?.limits?.threadsMax, 1);
+  const batchMax = Math.min(info?.limits?.batchMax || ctxSize, ctxSize);
+  const microBatchMax = Math.min(info?.limits?.microBatchMax || batchMax, batchMax);
+
+  runtime.modelPath = modelPath || info?.path || "";
+  runtime.ctxSize = ctxSize;
+  runtime.threads = threads;
+  runtime.threadsBatch = threads;
+  runtime.batchSize = boundedDefault(1024, batchMax, 32);
+  runtime.ubatchSize = boundedDefault(512, microBatchMax, 32);
+  runtime.parallel = 1;
+  runtime.priority = -1;
+  runtime.gpuLayers = modelLayerCount(info);
+  runtime.flashAttention = "on";
+  runtime.noWarmup = true;
+  runtime.extraArgs = alias ? `--alias ${alias}` : "";
+  return runtime;
+}
+
+function cacheElementBytes(cacheType: string): number {
+  const normalized = cacheType.trim().toLowerCase();
+  if (!normalized || normalized === "auto" || normalized === "f16" || normalized === "bf16") return 2;
+  if (normalized === "f32") return 4;
+  if (normalized === "q8_0") return 1;
+  if (normalized.startsWith("q6")) return 0.75;
+  if (normalized.startsWith("q5")) return 0.625;
+  if (normalized.startsWith("q4") || normalized.startsWith("iq4")) return 0.5;
+  return 2;
+}
+
+function kvCacheBytes(info: EditableModelInfo, runtime: LlamaServerRuntime): number {
+  const context = numericValue(runtime.ctxSize, info.contextLength || 0);
+  const parallel = Math.max(1, numericValue(runtime.parallel, 1));
+  const layers = modelLayerCount(info);
+  const embedding = info.embeddingLength;
+  const heads = info.headCount;
+  const kvHeads = info.headCountKV || heads;
+
+  if (context <= 0 || layers <= 0 || embedding <= 0 || heads <= 0 || kvHeads <= 0) return 0;
+
+  const headSize = embedding / heads;
+  const kvWidth = headSize * kvHeads;
+  const kBytes = cacheElementBytes(runtime.cacheTypeK);
+  const vBytes = cacheElementBytes(runtime.cacheTypeV);
+  return context * parallel * layers * kvWidth * (kBytes + vBytes);
+}
+
+export function estimateLlamaMemoryUsage(info: EditableModelInfo | null | undefined, runtime: LlamaServerRuntime): RuntimeMemoryEstimate | null {
+  if (!info) return null;
+  const notes: string[] = [];
+  const modelBytes = Math.max(0, info.fileSize || 0);
+  const layers = modelLayerCount(info);
+  const gpuLayers = Math.max(0, numericValue(runtime.gpuLayers, 0));
+  const layerFraction = layers > 0 ? Math.min(gpuLayers, layers) / layers : 0;
+  const kvBytes = kvCacheBytes(info, runtime);
+
+  if (modelBytes === 0) notes.push("model-size-missing");
+  if (kvBytes === 0) notes.push("kv-metadata-missing");
+
+  const overheadBytes = modelBytes > 0 || kvBytes > 0 ? Math.max(256 * 1024 * 1024, (modelBytes + kvBytes) * 0.03) : 0;
+  const modelGpuBytes = modelBytes * layerFraction;
+  const kvGpuBytes = gpuLayers > 0 ? kvBytes : 0;
+  const gpuOverheadBytes = gpuLayers > 0 ? overheadBytes : 0;
+
+  return {
+    totalBytes: modelBytes + kvBytes + overheadBytes,
+    gpuBytes: modelGpuBytes + kvGpuBytes + gpuOverheadBytes,
+    modelBytes,
+    kvBytes,
+    overheadBytes,
+    confidence: notes.length > 0 ? "low" : "medium",
+    notes,
+  };
+}
+
+export function estimateMLXMemoryUsage(info: EditableModelInfo | null | undefined): RuntimeMemoryEstimate | null {
+  if (!info) return null;
+  const modelBytes = Math.max(0, info.fileSize || 0);
+  const overheadBytes = modelBytes > 0 ? Math.max(256 * 1024 * 1024, modelBytes * 0.08) : 0;
+  return {
+    totalBytes: modelBytes + overheadBytes,
+    gpuBytes: modelBytes + overheadBytes,
+    modelBytes,
+    kvBytes: 0,
+    overheadBytes,
+    confidence: "low",
+    notes: modelBytes > 0 ? ["mlx-runtime-estimate"] : ["model-size-missing"],
+  };
+}
+
+export function formatMemorySize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "unknown";
+  const gb = bytes / (1024 ** 3);
+  if (gb >= 1) return `${gb.toFixed(gb >= 10 ? 1 : 2)} GB`;
+  const mb = bytes / (1024 ** 2);
+  return `${mb.toFixed(0)} MB`;
 }
 
 export function parseRuntimeCommand(cmd: string): ParsedRuntime {

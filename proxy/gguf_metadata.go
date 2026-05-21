@@ -47,6 +47,7 @@ type ggufModelInfo struct {
 	Exists            bool            `json:"exists"`
 	Backend           string          `json:"backend"`
 	Format            string          `json:"format"`
+	FileSize          int64           `json:"fileSize"`
 	Version           uint32          `json:"version"`
 	Name              string          `json:"name"`
 	Architecture      string          `json:"architecture"`
@@ -79,6 +80,9 @@ func inspectGGUFModel(modelPath string) (*ggufModelInfo, error) {
 	}
 
 	info := ggufInfoFromMetadata(expandedPath, version, metadata)
+	if stat, err := file.Stat(); err == nil {
+		info.FileSize = stat.Size()
+	}
 	return &info, nil
 }
 
@@ -329,6 +333,7 @@ func ggufInfoFromMetadata(modelPath string, version uint32, metadata map[string]
 		Exists:            true,
 		Backend:           "llama-server",
 		Format:            "gguf",
+		FileSize:          localModelDataSize(modelPath),
 		Version:           version,
 		Name:              stringMetadata(metadata, "general.name"),
 		Architecture:      architecture,
@@ -421,6 +426,7 @@ func inspectMLXModel(modelPath string) (*ggufModelInfo, error) {
 		Exists:            true,
 		Backend:           "mlx-lm",
 		Format:            "mlx",
+		FileSize:          localModelDataSize(expandedPath),
 		Name:              name,
 		Architecture:      architecture,
 		ModelType:         modelType,
@@ -447,6 +453,38 @@ func inspectMLXModel(modelPath string) (*ggufModelInfo, error) {
 		info.Warnings = append(info.Warnings, "context length was not found in config.json")
 	}
 	return &info, nil
+}
+
+func localModelDataSize(modelPath string) int64 {
+	stat, err := os.Stat(modelPath)
+	if err != nil {
+		return 0
+	}
+	if !stat.IsDir() {
+		return stat.Size()
+	}
+
+	var total int64
+	_ = filepath.WalkDir(modelPath, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			if entry.Name() != "." && strings.HasPrefix(entry.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext != ".safetensors" && ext != ".bin" && ext != ".gguf" {
+			return nil
+		}
+		if info, err := entry.Info(); err == nil {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
 }
 
 func looksLikeMLXModelDir(dir string) bool {
